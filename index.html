@@ -47,7 +47,8 @@
 
   /* Live */
   #live { padding:2vh; }
-  #videoWrap { position:relative; height:100%; max-width:100%; aspect-ratio:4/3; background:#000; overflow:hidden; border-radius:4px; }
+  /* Always a 4:3 landscape frame — exactly the area that gets printed, on any screen or phone orientation */
+  #videoWrap { position:relative; width:min(100%, calc((100vh - 4vh) * 4 / 3)); aspect-ratio:4/3; height:auto; background:#000; overflow:hidden; border-radius:4px; }
   #video { width:100%; height:100%; object-fit:cover; }
   #video.mirror { transform:scaleX(-1); }
   #count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
@@ -282,6 +283,9 @@
    Neither: runs with sample data (for testing only). */
 const API_URL = 'https://script.google.com/macros/s/AKfycbzF14l4AL5gA6HokJhwO2KM2LkY7g409s6vz-b11uD2lEXyvB60vGrSjcDLIvyH1D4sAA/exec';
 
+// Camera: 'front' = always open the front (selfie) camera · 'back' = always the back camera · '' = use the ⚙︎ setting
+const FORCE_CAMERA = 'front';
+
 const IN_GAS = !!(window.google && google.script && google.script.run);
 const GS = IN_GAS ? null : (API_URL ? makeApi(API_URL) : makeMock());
 function makeApi(url) {
@@ -351,7 +355,7 @@ function applySettingsToUI() {
   $('shopTitle').textContent = S.shopName || 'Receipt Photobooth';
   $('eventTitle').textContent = S.eventName || '';
   $('video').classList.toggle('mirror', S.mirror === 'true');
-  $('fileIn').setAttribute('capture', S.camera === 'front' ? 'user' : 'environment');
+  $('fileIn').setAttribute('capture', cameraChoice() === 'front' ? 'user' : 'environment');
   const strip4 = isStrip4();
   document.body.classList.toggle('simple', strip4);
   $('eventDateLine').textContent = eventDateText(S);
@@ -381,7 +385,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 /* ---------- Camera ---------- */
 async function startCamera() {
-  const facing = S && S.camera === 'front' ? 'user' : 'environment';
+  const facing = cameraChoice() === 'front' ? 'user' : 'environment';
   if (stream && streamFacing === facing) return true;
   stopCamera();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camWhy = 'not supported here'; return false; }
@@ -404,6 +408,7 @@ async function startCamera() {
     return false;
   }
 }
+function cameraChoice() { return FORCE_CAMERA || (S && S.camera) || 'front'; }
 function stopCamera() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; streamFacing = ''; } }
 
 function grabFrame() {
@@ -417,7 +422,7 @@ function grabFrame() {
   c.width = Math.min(1600, Math.round(sw)); c.height = Math.round(c.width * 3 / 4);
   const x = c.getContext('2d');
   // Front camera: keep the mirrored selfie look. Back camera: save the real (unflipped) view.
-  if (S.camera === 'front' && S.mirror === 'true') { x.translate(c.width, 0); x.scale(-1, 1); }
+  if (cameraChoice() === 'front' && S.mirror === 'true') { x.translate(c.width, 0); x.scale(-1, 1); }
   x.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
   return c;
 }
