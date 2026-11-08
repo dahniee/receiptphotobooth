@@ -289,8 +289,8 @@
    Neither: runs with sample data (for testing only). */
 const API_URL = 'https://script.google.com/macros/s/AKfycbzF14l4AL5gA6HokJhwO2KM2LkY7g409s6vz-b11uD2lEXyvB60vGrSjcDLIvyH1D4sAA/exec';
 
-// Camera: 'front' = always open the front (selfie) camera · 'back' = always the back camera · '' = use the ⚙︎ setting
-const FORCE_CAMERA = 'front';
+// Camera: '' = use the ⚙︎ Camera setting (front is the default) · 'front' / 'back' = always that camera, ignoring ⚙︎
+const FORCE_CAMERA = '';
 
 const IN_GAS = !!(window.google && google.script && google.script.run);
 const GS = IN_GAS ? null : (API_URL ? makeApi(API_URL) : makeMock());
@@ -312,7 +312,7 @@ function run(fn, ...args) {
 function makeMock() {
   let n = 0; const log = {};
   const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip3', tagline:'Thank you for coming!', footer:'Tag us @sdsprints',
-    printer:'paperang', paper:'58', camera:'back', countdown:'3', dither:'false', mirror:'true', autoPrint:'false',
+    printer:'paperang', paper:'58', camera:'front', countdown:'3', dither:'false', mirror:'true', autoPrint:'false',
     saveToDrive:'true', showQR:'true', folderUrl:'', hasPin:false, maxCopies:4 };
   return {
     getSettings: async () => ({ ...st }),
@@ -930,17 +930,18 @@ function renderStrip4(shots, s, no) {
   const G = Math.round(W * 0.02), ph = Math.round(inner * 3 / 4);
   const serif = 'Georgia, "Noto Serif", "Times New Roman", serif';
   const sans = 'system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif';
-  const titleSize = Math.round(W * 0.09), dateSize = Math.round(W * 0.036), smallSize = Math.round(W * 0.03);
-  const titleFont = '400 ' + titleSize + 'px ' + serif;
+  // Large, bold text so it stays readable after the Paperang app shrinks the image
+  const titleSize = Math.round(W * 0.115), dateSize = Math.round(W * 0.062), smallSize = Math.round(W * 0.052);
+  const titleFont = '700 ' + titleSize + 'px ' + serif;
 
   const lines = wrapText(s.eventName || 'Photo Booth', titleFont, inner);
   const lh = Math.round(titleSize * 1.12);
   let y = Math.round(W * 0.012);
   const titleTop = y; y += lines.length * lh;
-  const dateY = y + Math.round(dateSize * 1.1); y = dateY + Math.round(dateSize * 1.0);
+  const dateY = y + Math.round(dateSize * 1.15); y = dateY + Math.round(dateSize * 0.75);
   const photoTop = y; y += n * ph + (n - 1) * G;
-  const footY = y + Math.round(smallSize * 1.9);
-  const H = footY + Math.round(smallSize * 0.5);
+  const footY = y + Math.round(smallSize * 1.45);
+  const H = footY + Math.round(smallSize * 0.45);
 
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
@@ -948,16 +949,16 @@ function renderStrip4(shots, s, no) {
   x.fillStyle = '#000'; x.textAlign = 'center'; x.textBaseline = 'alphabetic';
   x.font = titleFont;
   lines.forEach((l, i) => x.fillText(l, W / 2, titleTop + titleSize + i * lh - Math.round(titleSize * 0.18)));
-  x.font = '600 ' + dateSize + 'px ' + sans;
-  x.fillText(spaced(eventDateText(s).toUpperCase()), W / 2, dateY);
+  x.font = '700 ' + dateSize + 'px ' + sans;
+  x.fillText(eventDateText(s).toUpperCase(), W / 2, dateY);
   for (let i = 0; i < n; i++) {
     const py = photoTop + i * (ph + G);
     if (shots[i]) drawPhoto(x, shots[i], M, py, inner, ph, dither);
     else { x.fillRect(M, py, inner, 2); x.fillRect(M, py + ph - 2, inner, 2); x.fillRect(M, py, 2, ph); x.fillRect(M + inner - 2, py, 2, ph); }
   }
   x.fillStyle = '#000';
-  x.font = '600 ' + smallSize + 'px ' + sans;
-  x.fillText(spaced((s.shopName || 'Receipt Photobooth').toUpperCase()) + '  ·  #' + String(no).padStart(6, '0'), W / 2, footY);
+  x.font = '700 ' + smallSize + 'px ' + sans;
+  x.fillText((s.shopName || 'Receipt Photobooth').toUpperCase(), W / 2, footY);
   return cv;
 }
 function wrapText(str, font, maxW) {
@@ -988,7 +989,7 @@ function renderColorStrip(shots, s, no) {
   const fy = head + shots.length * ph + (shots.length - 1) * G;
   x.fillStyle = '#141414'; x.fillRect(M, fy + 44, pw, 2);
   x.font = '600 22px ' + sans;
-  x.fillText(spaced((s.shopName || 'Receipt Photobooth').toUpperCase()) + '   ·   #' + String(no).padStart(6, '0'), W / 2, fy + 90);
+  x.fillText(spaced((s.shopName || 'Receipt Photobooth').toUpperCase()), W / 2, fy + 90);
   return cv;
 }
 function spaced(t) { return String(t).split('').join(' '); }
