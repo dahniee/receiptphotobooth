@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  /* Receipt Photobooth — minimalist: beige paper, black ink, thin rules. Landscape monitor first. */
+  :root { --bg:#ece3d3; --paper:#f6f1e7; --ink:#141414; --muted:#6f6758; --line:#141414; --soft:rgba(20,20,20,.14);
+          --danger:#a3271c; --ok:#141414; --serif: Georgia, "Noto Serif", "Times New Roman", serif;
+          --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:var(--sans); overflow:hidden; }
+  [hidden] { display:none !important; }
+  body:not(.clicker) .keys.ck { display:none; }
+  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; padding:2vh 3vw; }
+  .screen.on { display:flex; }
+  button { font:inherit; font-weight:600; letter-spacing:.02em; cursor:pointer; border-radius:6px; padding:14px 22px;
+    background:transparent; color:var(--ink); border:1.5px solid var(--line); }
+  button.primary { background:var(--ink); color:var(--bg); }
+  button:active { transform:translateY(1px); }
+  button:disabled { opacity:.4; cursor:default; }
+  button:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
+  .keys { color:var(--muted); font-size:clamp(13px,1.9vh,18px); text-align:center; }
+  .keys kbd { display:inline-block; min-width:1.8em; padding:1px 7px; margin:0 2px; border-radius:4px; border:1.5px solid var(--muted);
+    color:var(--ink); font:600 1em var(--sans); }
+
+  /* Start */
+  #start h1 { font:600 clamp(13px,2.2vh,20px)/1 var(--sans); letter-spacing:.32em; text-transform:uppercase; margin:0 0 2vh; text-align:center; }
+  #start .ev { font:400 clamp(30px,8vh,76px)/1.05 var(--serif); margin:0 0 5vh; text-align:center; text-wrap:balance; }
+  #frameTitle { font-size:clamp(14px,2.4vh,22px); font-weight:500; color:var(--muted); letter-spacing:.06em; margin-bottom:2.6vh; }
+  #frameChoice { display:flex; gap:clamp(12px,3vw,40px); flex-wrap:wrap; justify-content:center; }
+  .frameBtn { background:transparent; color:var(--ink); display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:2.2vh;
+    width:clamp(130px,18vw,230px); min-height:clamp(170px,34vh,310px); padding:3vh 12px 2.4vh; border-radius:8px;
+    border:1.5px solid var(--line); transition:background .15s, color .15s; }
+  .frameBtn b { font-size:clamp(15px,2.8vh,24px); font-weight:600; }
+  .frameBtn.sel { background:var(--ink); color:var(--bg); }
+  .strip { background:var(--paper); width:clamp(44px,5.4vw,70px); padding:6px 6px 12px; display:flex; flex-direction:column; gap:5px; border:1.5px solid var(--ink); }
+  .strip i { display:block; aspect-ratio:4/3; background:var(--ink); }
+  .frameBtn.sel .strip { border-color:var(--paper); }
+  #start .keys { margin-top:4vh; }
+  #fallbackBox { display:flex; flex-direction:column; align-items:center; gap:12px; margin-top:3vh; }
+  #fallbackBox p { margin:0; color:var(--muted); text-align:center; max-width:60ch; }
+  #startBtn { font-size:clamp(18px,3.2vh,28px); padding:16px 34px; }
+  #gear { position:fixed; top:10px; right:10px; border:0; font-size:22px; padding:8px 12px; color:var(--muted); z-index:5; }
+
+  /* Live */
+  #live { padding:2vh; }
+  #videoWrap { position:relative; height:100%; max-width:100%; aspect-ratio:4/3; background:#000; overflow:hidden; border-radius:4px; }
+  #video { width:100%; height:100%; object-fit:cover; }
+  #video.mirror { transform:scaleX(-1); }
+  #count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font:400 min(40vw,50vh)/1 var(--serif); color:#fff; text-shadow:0 0 40px rgba(0,0,0,.45); pointer-events:none; }
+  #flash { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; transition:opacity .4s; }
+  #flash.go { opacity:1; transition:none; }
+  #shotInfo { position:absolute; top:2vh; left:50%; transform:translateX(-50%); background:var(--bg); color:var(--ink);
+    padding:8px 18px; border-radius:4px; font-weight:600; letter-spacing:.08em; font-size:clamp(13px,2.4vh,22px); }
+  #thumbs { position:absolute; bottom:2vh; left:2vh; display:flex; gap:8px; }
+  #thumbs img { height:11vh; border:3px solid var(--paper); }
+  #cancelLive { position:absolute; top:2vh; right:2vh; background:var(--bg); border-color:var(--bg); padding:8px 14px; }
+
+  /* Review */
+  #review { flex-direction:row; gap:clamp(16px,4vw,64px); }
+  #paperWrap { height:calc(100vh - 4vh); max-height:100%; display:flex; align-items:flex-start; }
+  #receiptImg { display:block; height:100%; width:auto; max-width:38vw; object-fit:contain; object-position:top; background:#fff;
+    image-rendering:pixelated; box-shadow:0 1px 0 var(--soft), 0 12px 30px rgba(60,45,20,.18); -webkit-touch-callout:default; }
+  #side { display:flex; flex-direction:column; gap:2.2vh; width:min(500px,52vw); align-items:stretch; }
+  #side h2 { margin:0; font:400 clamp(22px,4.6vh,42px)/1.1 var(--serif); }
+  #copyBox { display:flex; flex-direction:column; gap:1.8vh; border-top:1.5px solid var(--line); padding-top:2.4vh; }
+  .copyRow { display:flex; align-items:center; justify-content:center; gap:28px; }
+  .copyRow button { width:clamp(48px,8vh,76px); height:clamp(48px,8vh,76px); padding:0; border-radius:50%; font-size:clamp(22px,4.4vh,38px); font-weight:400; }
+  #copyNum { font:400 clamp(56px,14vh,128px)/1 var(--serif); min-width:1.2em; text-align:center; font-variant-numeric:tabular-nums; }
+  #copyLabel { text-align:center; color:var(--muted); font-size:clamp(13px,2.2vh,20px); }
+  #printBtn, #shareBtn, #dialogPrintBtn { font-size:clamp(18px,3.4vh,30px); padding:2vh; }
+  #printedBox { border-top:1.5px solid var(--line); padding-top:2.4vh; text-align:center; }
+  #printedBox p { margin:1.2vh 0 0; color:var(--muted); font-size:clamp(13px,2.2vh,20px); line-height:1.45; }
+  .row2 { display:flex; gap:12px; }
+  .row2 button { flex:1; }
+  #qrBox { display:flex; align-items:center; gap:20px; border:1.5px solid var(--line); padding:14px 18px; border-radius:8px; }
+  #qr { width:clamp(100px,20vh,180px); height:clamp(100px,20vh,180px); flex:none; background:#fff; padding:6px; }
+  #qr img, #qr canvas { width:100% !important; height:100% !important; }
+  #qrText b { display:block; font:400 clamp(17px,3vh,28px)/1.2 var(--serif); }
+  #qrText span { color:var(--muted); font-size:clamp(12px,1.9vh,17px); }
+  #qrWait { color:var(--muted); font-size:clamp(13px,2vh,18px); text-align:center; }
+  #status { color:var(--muted); font-size:12px; min-height:16px; text-align:center; }
+  #shareHint { border:1.5px dashed var(--line); padding:12px; border-radius:6px; font-size:15px; text-align:center; line-height:1.45; }
+
+  /* Settings */
+  #settings { position:fixed; inset:0; background:rgba(20,20,20,.45); display:none; align-items:center; justify-content:center; z-index:10; padding:16px; }
+  #settings.on { display:flex; }
+  #settings .card { background:var(--paper); color:var(--ink); border:1.5px solid var(--line); border-radius:8px; padding:20px; width:min(620px,100%); max-height:100%; overflow:auto; }
+  #settings h2 { margin:0 0 14px; font:400 26px var(--serif); }
+  #settings h3 { margin:16px 0 8px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.16em; }
+  .row { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; }
+  .row label { font-size:13px; color:var(--muted); }
+  .row input[type=text], .row input[type=password], .row select { font:inherit; padding:10px; border-radius:6px; border:1.5px solid var(--soft); background:#fff; color:var(--ink); }
+  .check { flex-direction:row; align-items:center; gap:10px; }
+  .check input { width:20px; height:20px; flex:none; accent-color:var(--ink); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .btns { display:flex; gap:10px; justify-content:flex-end; margin-top:8px; }
+  .err { color:var(--danger); font-size:14px; min-height:18px; }
+
+  /* Simple flow (4-photo strip): tap anywhere → 4 shots → preview with Print + QR underneath */
+  #start .date, #tapHint { display:none; }
+  body.simple #start { cursor:pointer; }
+  body.simple #frameTitle, body.simple #frameChoice, body.simple #startKeys { display:none !important; }
+  body.simple #start .date { display:block; font:600 clamp(13px,2.2vh,20px) var(--sans); letter-spacing:.3em; text-transform:uppercase; color:var(--muted); margin-top:-2vh; }
+  body.simple #tapHint { display:block; margin-top:9vh; font-size:clamp(13px,2.2vh,20px); letter-spacing:.28em; text-transform:uppercase; animation:pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  @media (prefers-reduced-motion: reduce) { body.simple #tapHint { animation:none; } }
+  body.simple #shotInfo { font:400 clamp(22px,5vh,46px)/1 var(--serif); letter-spacing:0; padding:10px 24px; }
+  body.simple #review { flex-direction:column; gap:2.4vh; padding:2.4vh 3vw; }
+  body.simple #paperWrap { height:auto; max-height:none; }
+  body.simple #receiptImg { height:calc(100vh - 4.8vh - 2.4vh - 22vh); max-width:none; }
+  body.simple #side { flex-direction:row; align-items:stretch; justify-content:center; width:auto; height:22vh; gap:2vw; }
+  body.simple #copyBox, body.simple #printedBox, body.simple #shareBtn, body.simple #dialogPrintBtn, body.simple #reprintBtn, body.simple #status { display:none !important; }
+  body.simple #bigPrint { font-size:clamp(20px,4.2vh,38px); padding:0 7vw; min-width:28vw; }
+  body.simple #qrBox { padding:1.2vh 18px; gap:16px; }
+  body.simple #qr { width:calc(22vh - 2.4vh - 3px); height:calc(22vh - 2.4vh - 3px); padding:5px; }
+  body.simple #qrWait { align-self:center; max-width:16ch; }
+  body.simple .row2 { flex-direction:column; justify-content:center; gap:8px; }
+  body.simple .row2 button { flex:none; border:0; padding:6px 10px; color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
+  body.simple #shareHint { position:fixed; left:50%; bottom:calc(22vh + 5vh); transform:translateX(-50%); background:var(--paper); max-width:min(560px,90vw); z-index:3; }
+  #thanks { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:var(--bg); z-index:8; font:400 clamp(36px,9vh,84px) var(--serif); }
+  #thanks.on { display:flex; }
+
+  @media (orientation: portrait) {
+    #review { flex-direction:column; justify-content:flex-start; overflow:auto; }
+    #paperWrap { height:auto; } #receiptImg { height:auto; width:min(320px,70vw); max-width:none; }
+    #side { width:min(520px,100%); }
+  }
+
+  #fileIn { display:none; }
+  #printArea { display:none; }
+  @media print {
+    @page { margin:0; }
+    html,body { background:#fff; overflow:visible; height:auto; }
+    body > *:not(#printArea) { display:none !important; }
+    #printArea { display:block !important; }
+    #printArea img { display:block; image-rendering:pixelated; }
+  }
+</style>
+</head>
+<body>
+
+<button id="gear" title="Settings">⚙︎</button>
+
+<!-- START -->
+<div id="start" class="screen on">
+  <h1 id="shopTitle">Receipt Photobooth</h1>
+  <div class="ev" id="eventTitle">Photo Booth</div>
+  <div class="date" id="eventDateLine"></div>
+  <div id="tapHint">Tap to start</div>
+  <div id="frameTitle">Choose your frames</div>
+  <div id="frameChoice">
+    <button class="frameBtn" data-n="1"><span class="strip"><i></i></span><b>1 frame</b></button>
+    <button class="frameBtn" data-n="2"><span class="strip"><i></i><i></i></span><b>2 frames</b></button>
+    <button class="frameBtn sel" data-n="3"><span class="strip"><i></i><i></i><i></i></span><b>3 frames</b></button>
+    <button class="frameBtn" data-n="4" hidden><span class="strip"><i></i><i></i><i></i><i></i></span><b>Tap to start</b></button>
+  </div>
+  <div class="keys" id="startKeys">Clicker: <kbd>◀</kbd> change frames · <kbd>▶</kbd> start — or tap a frame</div>
+  <div id="fallbackBox" hidden>
+    <p id="fallbackText"></p>
+    <button id="startBtn" class="primary">Take photo 1 of 3</button>
+    <button id="backBtn" style="background:transparent;color:var(--muted)">← Change frames</button>
+  </div>
+</div>
+
+<!-- LIVE CAMERA -->
+<div id="live" class="screen">
+  <div id="videoWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="count"></div>
+    <div id="flash"></div>
+    <div id="shotInfo"></div>
+    <div id="thumbs"></div>
+    <button id="cancelLive">Cancel</button>
+  </div>
+</div>
+
+<!-- REVIEW / PRINT -->
+<div id="review" class="screen">
+  <div id="paperWrap"><img id="receiptImg" alt="Your receipt"></div>
+  <div id="side">
+    <!-- RawBT: choose copies, then print -->
+    <div id="copyBox">
+      <h2>How many copies?</h2>
+      <div class="copyRow">
+        <button id="minusBtn" aria-label="Fewer copies">−</button>
+        <div id="copyNum">1</div>
+        <button id="plusBtn" aria-label="More copies">+</button>
+      </div>
+      <div id="copyLabel">One for everyone in the photo · max 4</div>
+      <button id="printBtn" class="primary">Print</button>
+      <div class="keys ck">Clicker: <kbd>◀</kbd> add a copy · <kbd>▶</kbd> print</div>
+    </div>
+    <!-- After printing -->
+    <div id="printedBox" hidden>
+      <h2 id="printedTitle">Printing…</h2>
+      <p id="printedText">Grab your receipt from the printer.</p>
+      <div class="keys ck" style="margin-top:1.6vh">Clicker: <kbd>▶</kbd> done</div>
+    </div>
+    <!-- Paperang / Print-dialog modes -->
+    <button id="shareBtn" class="primary" hidden>Save / Share</button>
+    <div id="shareHint" hidden>Press and hold the receipt → <b>Share image → Paperang</b> (or <b>Download image</b>, then print it from the Paperang app).</div>
+    <button id="dialogPrintBtn" class="primary" hidden>Print</button>
+
+    <button id="bigPrint" class="primary" hidden>Print</button>
+    <div id="qrBox" hidden><div id="qr"></div><div id="qrText"><b>Scan to download</b><span>your full-colour photo</span></div></div>
+    <div id="qrWait" hidden>Preparing your download QR…</div>
+    <div class="row2">
+      <button id="retakeBtn">Retake</button>
+      <button id="reprintBtn" hidden>Print 1 more</button>
+      <button id="doneBtn">Done</button>
+    </div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settings">
+  <div class="card">
+    <h2>Booth settings</h2>
+    <div id="pinGate" class="row" style="display:none">
+      <label for="pinIn">PIN</label>
+      <input type="password" id="pinIn" inputmode="numeric">
+    </div>
+    <div id="setForm">
+      <h3>Receipt</h3>
+      <div class="grid2">
+        <div class="row"><label for="s_shopName">Shop name (header)</label><input type="text" id="s_shopName"></div>
+        <div class="row"><label for="s_eventName">Event name</label><input type="text" id="s_eventName"></div>
+      </div>
+      <div class="grid2">
+        <div class="row"><label for="s_layout">Layout</label>
+          <select id="s_layout"><option value="receipt">Receipt (guest picks 1–3 frames)</option><option value="strip4">Photo strip — 4 photos</option></select></div>
+        <div class="row"><label for="s_eventDate">Date on the print (blank = today)</label><input type="text" id="s_eventDate" placeholder="November 28, 2026"></div>
+      </div>
+      <div class="row"><label for="s_tagline">Tagline (receipt layout)</label><input type="text" id="s_tagline"></div>
+      <div class="row"><label for="s_footer">Footer</label><input type="text" id="s_footer"></div>
+      <h3>Printer &amp; camera</h3>
+      <div class="grid2">
+        <div class="row"><label for="s_printer">Printer</label>
+          <select id="s_printer">
+            <option value="rawbt">Receipt printer via RawBT (Android, auto print)</option>
+            <option value="paperang">Paperang / printer app (Save / Share)</option>
+            <option value="browser">Printer via Print dialog</option>
+          </select></div>
+        <div class="row"><label for="s_paper">Paper roll</label>
+          <select id="s_paper"><option value="58">58 mm</option><option value="80">80 mm</option></select></div>
+        <div class="row"><label for="s_camera">Camera</label>
+          <select id="s_camera"><option value="back">Back camera (best quality)</option><option value="front">Front camera</option></select></div>
+        <div class="row"><label for="s_countdown">Countdown (seconds)</label>
+          <select id="s_countdown"><option>2</option><option>3</option><option>5</option><option>10</option></select></div>
+      </div>
+      <div class="row check"><input type="checkbox" id="s_mirror"><label for="s_mirror">Mirror the live preview (selfie view)</label></div>
+      <div class="row check"><input type="checkbox" id="s_dither"><label for="s_dither">Dot look (Paperang / Print-dialog modes only; RawBT always uses dots)</label></div>
+      <div class="row check"><input type="checkbox" id="s_autoPrint"><label for="s_autoPrint">Open print dialog automatically (Print-dialog mode only)</label></div>
+      <h3>Saving &amp; download</h3>
+      <div class="row check"><input type="checkbox" id="s_showQR"><label for="s_showQR">Show QR so guests can download the colour photo</label></div>
+      <div class="row check"><input type="checkbox" id="s_saveToDrive"><label for="s_saveToDrive">Also save the receipt image to Drive</label></div>
+      <div class="row"><label for="s_folderUrl">Drive folder link (optional — blank = booth makes its own)</label><input type="text" id="s_folderUrl" placeholder="https://drive.google.com/drive/folders/…"></div>
+      <div class="row"><label for="newPin">New PIN (blank = keep)</label><input type="password" id="newPin" inputmode="numeric" placeholder="unchanged"></div>
+    </div>
+    <div class="err" id="setErr"></div>
+    <div class="btns">
+      <button id="setCancel">Close</button>
+      <button id="setSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileIn" accept="image/*" capture="environment">
+<div id="thanks">Thank you!</div>
+<div id="printArea"><img id="printImg" alt=""></div>
+
+<script>
+/* ---------- Server connection ----------
+   Inside Apps Script: uses google.script.run.
+   Hosted elsewhere (GitHub Pages etc. — use this if the live camera is blocked inside Apps Script):
+   paste your Apps Script /exec URL below. Deployment access must be "Anyone".
+   Neither: runs with sample data (for testing only). */
+const API_URL = '';
+
+const IN_GAS = !!(window.google && google.script && google.script.run);
+const GS = IN_GAS ? null : (API_URL ? makeApi(API_URL) : makeMock());
+function makeApi(url) {
+  const call = fn => async (...args) => {
+    const r = await fetch(url, { method: 'POST', body: JSON.stringify({ fn, args }) });   // text/plain → no CORS preflight
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    return j.result;
+  };
+  return new Proxy({}, { get: (_, fn) => call(fn) });
+}
+function run(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    if (GS) return GS[fn](...args).then(resolve, reject);
+    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+  });
+}
+function makeMock() {
+  let n = 0; const log = {};
+  const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip4', tagline:'Thank you for coming!', footer:'Tag us @sdsprints',
+    printer:'paperang', paper:'58', camera:'back', countdown:'3', dither:'false', mirror:'true', autoPrint:'false',
+    saveToDrive:'true', showQR:'true', folderUrl:'', hasPin:false, maxCopies:4 };
+  return {
+    getSettings: async () => ({ ...st }),
+    saveSettings: async (o) => (Object.assign(st, o), { ...st }),
+    checkPin: async () => true,
+    nextReceiptNo: async () => ++n,
+    saveStrip: async (r, info, c) => { await sleep(300); window.__lastSave = { receiptBytes: r.length, colorBytes: c ? c.length : 0 };
+      return { receiptNo: info.receiptNo, downloadUrl: c ? 'https://example.com/exec?photo=MOCK' + info.receiptNo : '' }; },
+    logCopies: async (no, k) => { log[no] = (log[no] || 0) + k; window.__copies = log; return true; }
+  };
+}
+
+/* ---------- State ---------- */
+let S = null;                 // settings
+let stream = null, streamFacing = '';
+let camWhy = '', camFailed = false;
+let photos = [];
+let busy = false, cancelled = false;
+let lastStrip = null;         // {dataUrl, canvas, receiptNo, colorUrl}
+let idleTimer = null;
+let pinOK = false;
+let chosenN = 3;
+let copies = 1;
+let printed = false;
+let mode = 'start';           // start | live | review
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const MAXC = () => Number((S && S.maxCopies) || 4);
+const printerMode = () => (S && S.printer) || 'rawbt';
+
+function show(id) {
+  mode = id;
+  document.querySelectorAll('.screen').forEach(e => e.classList.toggle('on', e.id === id));
+  $('gear').style.display = id === 'start' ? '' : 'none';
+}
+
+/* ---------- Init ---------- */
+(async function init() {
+  try { S = await run('getSettings'); } catch (e) { S = await makeMock().getSettings(); }
+  applySettingsToUI();
+  startCamera();                        // warm up the camera so the first countdown starts instantly
+})();
+
+function applySettingsToUI() {
+  $('shopTitle').textContent = S.shopName || 'Receipt Photobooth';
+  $('eventTitle').textContent = S.eventName || '';
+  $('video').classList.toggle('mirror', S.mirror === 'true');
+  $('fileIn').setAttribute('capture', S.camera === 'front' ? 'user' : 'environment');
+  const strip4 = isStrip4();
+  document.body.classList.toggle('simple', strip4);
+  $('eventDateLine').textContent = eventDateText(S);
+  document.querySelectorAll('.frameBtn').forEach(b => b.hidden = strip4 ? b.dataset.n !== '4' : b.dataset.n === '4');
+  $('frameTitle').textContent = strip4 ? 'Get ready for 4 photos!' : 'Choose your frames';
+  $('startKeys').innerHTML = strip4 ? (hasClicker ? 'Clicker: <kbd>▶</kbd> start' : '')
+                                     : 'Tap a frame to start' + (hasClicker ? ' · Clicker: <kbd>◀</kbd> change · <kbd>▶</kbd> start' : '');
+  if (strip4) chosenN = 4; else if (chosenN > 3) chosenN = 3;
+  selectFrame(chosenN);
+  // Paperang mode uses the same copies picker; the button hands the receipt to the Paperang app
+  $('printBtn').textContent = printerMode() === 'paperang' ? 'Print in Paperang' : 'Print';
+}
+function isStrip4() { return S && S.layout === 'strip4'; }
+let hasClicker = false;   // becomes true after the first clicker/keyboard press — then clicker hints are shown
+
+function selectFrame(n) {
+  chosenN = n;
+  document.querySelectorAll('.frameBtn').forEach(b => b.classList.toggle('sel', Number(b.dataset.n) === n));
+}
+
+/* ---------- Screen wake lock (keeps the phone awake during events) ---------- */
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+/* ---------- Camera ---------- */
+async function startCamera() {
+  const facing = S && S.camera === 'front' ? 'user' : 'environment';
+  if (stream && streamFacing === facing) return true;
+  stopCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camWhy = 'not supported here'; return false; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false
+    });
+    streamFacing = facing;
+    $('video').srcObject = stream;
+    await new Promise(r => { const v = $('video'); if (v.readyState >= 2) r(); else v.onloadeddata = r; });
+    camFailed = false;
+    return true;
+  } catch (e) {
+    console.warn('Camera unavailable', e);
+    stream = null;
+    camWhy = (e && e.name === 'NotAllowedError') ? (IN_GAS ? 'blocked inside Apps Script' : 'permission denied — allow Camera for this site in Chrome')
+           : (e && e.name === 'NotFoundError') ? 'no camera found'
+           : (e && e.name === 'NotReadableError') ? 'camera busy in another app'
+           : ((e && e.name) || 'unknown error');
+    return false;
+  }
+}
+function stopCamera() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; streamFacing = ''; } }
+
+function grabFrame() {
+  // Centre crop to 4:3 at full camera resolution (max 1600×1200) for the colour download
+  const v = $('video');
+  const vw = v.videoWidth, vh = v.videoHeight;
+  let sw = vw, sh = vw * 3 / 4;
+  if (sh > vh) { sh = vh; sw = vh * 4 / 3; }
+  const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+  const c = document.createElement('canvas');
+  c.width = Math.min(1600, Math.round(sw)); c.height = Math.round(c.width * 3 / 4);
+  const x = c.getContext('2d');
+  // Front camera: keep the mirrored selfie look. Back camera: save the real (unflipped) view.
+  if (S.camera === 'front' && S.mirror === 'true') { x.translate(c.width, 0); x.scale(-1, 1); }
+  x.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+
+/* ---------- Session ---------- */
+document.querySelectorAll('.frameBtn').forEach(b => b.onclick = () => { selectFrame(Number(b.dataset.n)); begin(); });
+// 4-photo strip: tap anywhere on the start screen
+$('start').addEventListener('click', (e) => {
+  if (!isStrip4() || !$('fallbackBox').hidden || e.target.closest('button')) return;
+  selectFrame(4); begin();
+});
+function begin() { keepAwake(); if (camFailed) startFallback(); else startSession(); }
+
+// Camera-app fallback (if the live camera is blocked). Opening the camera app must happen straight from a tap/key.
+function startFallback() {
+  if (busy) return;
+  photos = []; cancelled = false;
+  showFallbackStep();
+  $('fileIn').click();
+}
+function showFallbackStep() {
+  $('frameChoice').hidden = true; $('frameTitle').hidden = true; $('startKeys').hidden = true;
+  $('fallbackBox').hidden = false;
+  $('startBtn').textContent = 'Take photo ' + (photos.length + 1) + ' of ' + chosenN;
+  $('fallbackText').textContent = 'Live camera unavailable (' + camWhy + '). Tap the button to open the camera.';
+}
+$('startBtn').onclick = () => $('fileIn').click();
+$('backBtn').onclick = () => goHome();
+
+async function startSession() {
+  if (busy) return;
+  busy = true; cancelled = false; photos = [];
+  $('thumbs').innerHTML = '';
+  const ok = await startCamera();
+  if (!ok) { busy = false; camFailed = true; showFallbackStep(); return; }
+  show('live');
+  const n = chosenN;
+  const secs = Math.max(1, Number(S.countdown) || 3);
+  for (let i = 0; i < n && !cancelled; i++) {
+    $('shotInfo').textContent = (i + 1) + ' of ' + n;
+    for (let s = secs; s > 0 && !cancelled; s--) { $('count').textContent = s; await sleep(1000); }
+    if (cancelled) break;
+    $('count').textContent = '';
+    flash();
+    const c = grabFrame();
+    photos.push(c);
+    const t = new Image(); t.src = c.toDataURL('image/jpeg', .5); $('thumbs').appendChild(t);
+    await sleep(1000);
+  }
+  $('count').textContent = '';
+  if (cancelled) { busy = false; goHome(); return; }
+  await finish();
+}
+$('cancelLive').onclick = () => { cancelled = true; };
+
+$('fileIn').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const img = await loadImage(URL.createObjectURL(f));
+  photos.push(cropToCanvas(img));
+  if (photos.length < chosenN) { showFallbackStep(); return; }
+  busy = true;
+  await finish();
+};
+
+function loadImage(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+function cropToCanvas(img) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  let sw = w, sh = w * 3 / 4; if (sh > h) { sh = h; sw = h * 4 / 3; }
+  const c = document.createElement('canvas'); c.width = Math.min(1600, Math.round(sw)); c.height = Math.round(c.width * 3 / 4);
+  c.getContext('2d').drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+function flash() {
+  const f = $('flash'); f.classList.add('go'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('go')));
+}
+
+/* ---------- Review & print ---------- */
+async function finish() {
+  show('review');
+  printed = false; copies = 1;
+  $('copyNum').textContent = copies;
+  $('status').textContent = '';
+  $('qrBox').hidden = true; $('qr').innerHTML = ''; $('qrWait').hidden = S.showQR !== 'true';
+  const pm = printerMode();
+  $('copyBox').hidden = !(pm === 'rawbt' || pm === 'paperang');
+  $('printedBox').hidden = true;
+  $('shareBtn').hidden = true; sharePending = false; clearInterval(backTimer);
+  $('shareHint').hidden = true;
+  $('dialogPrintBtn').hidden = pm !== 'browser';
+  $('retakeBtn').hidden = false; $('reprintBtn').hidden = true;
+  $('reprintBtn').textContent = pm === 'paperang' ? 'Share again' : 'Print 1 more';
+  const simple = isStrip4();
+  $('bigPrint').hidden = !simple; $('bigPrint').textContent = 'Print'; $('bigPrint').disabled = true;
+  $('doneBtn').hidden = simple; shareDone = false;
+
+  let no;
+  try { no = await run('nextReceiptNo'); } catch (e) { no = Math.floor(Date.now() / 1000) % 1000000; }
+  const canvas = renderReceipt(photos, S, no);
+  const dataUrl = canvas.toDataURL('image/png');
+  lastStrip = { dataUrl, canvas, receiptNo: no };
+  $('receiptImg').src = dataUrl;
+  $('printImg').src = dataUrl;
+  $('printImg').style.width = (S.paper === '80' ? 72 : 48) + 'mm';
+  $('bigPrint').disabled = false;
+  busy = false;
+  resetIdle(60000);
+
+  if (pm === 'browser' && S.autoPrint === 'true') setTimeout(dialogPrint, 400);
+
+  // Upload in the background: colour strip for the QR download (+ receipt image)
+  const wantQR = S.showQR === 'true';
+  if (!wantQR && S.saveToDrive !== 'true') return;
+  const colorUrl = wantQR ? renderColorStrip(photos, S, no).toDataURL('image/jpeg', 0.88) : '';
+  const thisNo = no;
+  try {
+    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length }, colorUrl);
+    if (!lastStrip || lastStrip.receiptNo !== thisNo) return;          // guest already moved on
+    $('qrWait').hidden = true;
+    if (wantQR && r.downloadUrl && window.QRCode) {
+      new QRCode($('qr'), { text: r.downloadUrl, width: 400, height: 400, correctLevel: QRCode.CorrectLevel.M });
+      $('qrBox').hidden = false;
+    }
+    $('status').textContent = 'Saved ✓ #' + String(no).padStart(6, '0');
+  } catch (e) {
+    if (lastStrip && lastStrip.receiptNo === thisNo) {
+      $('qrWait').hidden = true;
+      $('status').textContent = 'Couldn’t upload (no internet?) — the receipt still prints.';
+    }
+  }
+}
+
+function setCopies(n) {
+  if (printed) return;
+  copies = Math.max(1, Math.min(MAXC(), n));
+  $('copyNum').textContent = copies;
+  resetIdle(60000);
+}
+$('minusBtn').onclick = () => setCopies(copies - 1);
+$('plusBtn').onclick = () => setCopies(copies + 1);
+$('printBtn').onclick = () => printerMode() === 'paperang' ? shareNow() : printNow();
+$('reprintBtn').onclick = () => { if (!lastStrip) return; if (printerMode() === 'paperang') { shareImage(); resetIdle(60000); return; } sendToRawBT(escposFromCanvas(lastStrip.canvas, 1)); logCopies(1); resetIdle(30000); };
+
+function printNow() {
+  if (!lastStrip || printed) return;
+  printed = true;
+  sendToRawBT(escposFromCanvas(lastStrip.canvas, copies));
+  logCopies(copies);
+  $('copyBox').hidden = true;
+  $('printedBox').hidden = false;
+  $('printedTitle').textContent = copies === 1 ? 'Printing your receipt…' : 'Printing ' + copies + ' copies…';
+  $('printedText').textContent = 'Grab your receipt' + (copies > 1 ? 's' : '') + ' from the printer and tear across the edge.';
+  $('retakeBtn').hidden = true; $('reprintBtn').hidden = false;
+  resetIdle(30000);
+}
+function logCopies(n) { if (lastStrip) run('logCopies', lastStrip.receiptNo, n).catch(() => {}); }
+
+function dialogPrint() { resetIdle(60000); window.print(); }
+$('dialogPrintBtn').onclick = dialogPrint;
+
+// Paperang / printer-app mode: share sheet → Paperang app. When staff come back, the booth resets by itself.
+let sharePending = false, backTimer = null;
+let shareDone = false;
+async function shareImage() {
+  try {
+    const blob = await new Promise(r => lastStrip.canvas.toBlob(r, 'image/jpeg', 0.95));
+    const file = new File([blob], 'Photobooth-' + String(lastStrip.receiptNo).padStart(6, '0') + '.jpg', { type: 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); shareDone = true; return true; }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return false;     // share menu closed without choosing an app
+  }
+  $('shareHint').hidden = false;                        // share not available here → long-press fallback
+  return false;
+}
+async function shareNow() {
+  if (!lastStrip || printed) return;
+  printed = true;
+  logCopies(copies);
+  $('copyBox').hidden = true;
+  $('printedBox').hidden = false;
+  $('printedTitle').textContent = 'Print ' + copies + (copies === 1 ? ' copy' : ' copies') + ' in Paperang';
+  $('printedText').textContent = 'Choose Paperang → tap Print' + (copies > 1 ? ' ' + copies + ' times' : '') + ', then press Back. The booth starts over by itself.';
+  $('retakeBtn').hidden = true; $('reprintBtn').hidden = false;
+  resetIdle(120000);
+  sharePending = true;
+  await shareImage();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !sharePending || mode !== 'review') return;
+  if (isStrip4()) {
+    // wait a moment: Android reports "app chosen" just before or after Chrome comes back
+    setTimeout(() => { if (shareDone && sharePending) { sharePending = false; thankAndHome(); } }, 900);
+    return;
+  }
+  sharePending = false;
+  let left = 5;
+  $('printedText').textContent = 'Welcome back! Starting over in ' + left + ' s…';
+  clearInterval(backTimer);
+  backTimer = setInterval(() => {
+    left--;
+    if (left <= 0) { clearInterval(backTimer); goHome(); }
+    else $('printedText').textContent = 'Welcome back! Starting over in ' + left + ' s…';
+  }, 1000);
+});
+$('shareBtn').onclick = () => shareNow();
+
+// Simple flow: one Print button → share menu → Paperang → back to "Tap to start"
+$('bigPrint').onclick = async () => {
+  if (!lastStrip) return;
+  const pm = printerMode();
+  resetIdle(120000);
+  if (pm === 'browser') { dialogPrint(); return; }
+  if (!printed) logCopies(1);
+  printed = true;
+  $('doneBtn').hidden = false; $('retakeBtn').hidden = true;
+  if (pm === 'rawbt') { sendToRawBT(escposFromCanvas(lastStrip.canvas, 1)); $('bigPrint').textContent = 'Print again'; setTimeout(thankAndHome, 4000); return; }
+  $('bigPrint').textContent = 'Print again';
+  sharePending = true;
+  await shareImage();
+};
+function thankAndHome() {
+  if (mode !== 'review') return;
+  $('thanks').classList.add('on');
+  setTimeout(() => { $('thanks').classList.remove('on'); goHome(); }, 1600);
+}
+// Any tap on the review screen cancels the automatic restart (e.g. to share again)
+document.addEventListener('pointerdown', (e) => { if (backTimer && e.target && e.target.id !== 'doneBtn') { clearInterval(backTimer); backTimer = null; $('printedText').textContent = 'Tap Done when finished.'; } }, true);
+
+function retake() { clearTimeout(idleTimer); lastStrip = null; show('start'); begin(); }
+$('retakeBtn').onclick = retake;
+$('doneBtn').onclick = goHome;
+
+function goHome() {
+  clearTimeout(idleTimer); clearInterval(backTimer); backTimer = null; sharePending = false; shareDone = false;
+  photos = []; lastStrip = null; printed = false; busy = false;
+  $('fallbackBox').hidden = true; $('frameChoice').hidden = false; $('frameTitle').hidden = false; $('startKeys').hidden = false;
+  applySettingsToUI();
+  show('start');
+}
+function resetIdle(ms) { clearTimeout(idleTimer); idleTimer = setTimeout(goHome, ms || 60000); }
+document.addEventListener('pointerdown', () => { try { window.focus(); } catch (e) {} if (mode === 'review') resetIdle(printed ? 30000 : 60000); });
+
+/* ---------- Clicker / keyboard ----------
+   Presentation clickers send arrow / PageUp / PageDown keys. Selfie remotes that send "Volume Up" don't reach web pages. */
+const NEXT_KEYS = ['ArrowRight', 'ArrowDown', 'PageDown', 'Enter', ' ', 'Spacebar', 'n', 'N', 'MediaTrackNext', 'AudioVolumeUp'];
+const PREV_KEYS = ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'p', 'P', 'MediaTrackPrevious', 'AudioVolumeDown'];
+const RETAKE_KEYS = ['b', 'B', '.', 'r', 'R'];          // the "black screen" button on many clickers
+let lastKey = 0;
+window.addEventListener('keydown', (e) => {
+  if ($('settings').classList.contains('on')) return;
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const k = e.key;
+  const act = NEXT_KEYS.includes(k) ? 'next' : PREV_KEYS.includes(k) ? 'prev' : RETAKE_KEYS.includes(k) ? 'retake' : '';
+  if (!act) return;
+  e.preventDefault();
+  if (!hasClicker) { hasClicker = true; document.body.classList.add('clicker'); if (mode === 'start') applySettingsToUI(); }
+  const now = Date.now(); if (now - lastKey < 350) return; lastKey = now;   // ignore double presses / key repeat
+  onClicker(act);
+});
+
+function onClicker(act) {
+  if (mode === 'start') {
+    if (!$('fallbackBox').hidden) {                        // camera-app mode
+      if (act === 'next') $('fileIn').click(); else if (act === 'prev') goHome();
+      return;
+    }
+    if (act === 'prev' && !isStrip4()) selectFrame(chosenN % 3 + 1);
+    else if (act === 'next') begin();
+  } else if (mode === 'live') {
+    if (act === 'retake') cancelled = true;
+  } else if (mode === 'review') {
+    if (busy) return;
+    if (isStrip4()) { if (act === 'next') $('bigPrint').click(); else if (act === 'retake' && !printed) retake(); return; }
+    const pm = printerMode();
+    if (printed || pm === 'browser') {
+      if (act === 'next') { if (pm === 'browser' && !printed) { printed = true; dialogPrint(); } else goHome(); }
+      else if (act === 'retake' && !printed) retake();
+      return;
+    }
+    if (act === 'prev') setCopies(copies >= MAXC() ? 1 : copies + 1);
+    else if (act === 'next') { if (pm === 'paperang') shareNow(); else printNow(); }
+    else if (act === 'retake') retake();
+  }
+}
+
+/* ---------- RawBT / ESC-POS ---------- */
+// Turns the black & white receipt canvas into ESC/POS raster commands (GS v 0), repeated for each copy.
+function escposFromCanvas(cv, n) {
+  const w = cv.width, h = cv.height, bw = Math.ceil(w / 8);
+  const px = cv.getContext('2d').getImageData(0, 0, w, h).data;
+  const BAND = 128;                                      // small bands — cheap printers have small buffers
+  const img = [];
+  for (let y0 = 0; y0 < h; y0 += BAND) {
+    const bh = Math.min(BAND, h - y0);
+    img.push(0x1d, 0x76, 0x30, 0x00, bw & 255, bw >> 8, bh & 255, bh >> 8);
+    for (let y = y0; y < y0 + bh; y++) {
+      for (let bx = 0; bx < bw; bx++) {
+        let byte = 0;
+        for (let b = 0; b < 8; b++) {
+          const x = bx * 8 + b;
+          if (x < w) {
+            const i = (y * w + x) * 4;
+            const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+            if (lum < 128) byte |= 0x80 >> b;
+          }
+        }
+        img.push(byte);
+      }
+    }
+  }
+  // ESC d 4 — feed 4 lines so it clears the tear bar · GS V B 0 — cut (ignored by printers without a cutter)
+  const tail = [0x1b, 0x64, 0x04, 0x1d, 0x56, 0x42, 0x00];
+  const one = img.length + tail.length;
+  const out = new Uint8Array(2 + n * one);
+  out[0] = 0x1b; out[1] = 0x40;                          // ESC @ — reset printer
+  for (let c = 0; c < n; c++) { out.set(img, 2 + c * one); out.set(tail, 2 + c * one + img.length); }
+  return out;
+}
+function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function sendToRawBT(bytes) {
+  window.__lastPrint = bytes;                            // for testing
+  const url = 'intent:base64,' + toBase64(bytes) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+  if (!/Android/i.test(navigator.userAgent)) { $('status').textContent = 'Print data ready (' + Math.round(bytes.length / 1024) + ' KB) — RawBT only runs on Android.'; return; }
+  const a = document.createElement('a'); a.href = url; a.target = '_top'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  // When RawBT hands control back, make sure clicker presses reach the booth again
+  [400, 1500, 4000].forEach(t => setTimeout(refocus, t));
+}
+function refocus() { try { window.focus(); document.body.tabIndex = -1; document.body.focus({ preventScroll: true }); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(refocus, 200); });
+
+/* ---------- Receipt rendering (black & white) ---------- */
+function receiptWidth(s) {
+  if ((s.printer || 'rawbt') === 'paperang') return 576;   // Paperang P2S ≈ 300 dpi
+  return s.paper === '80' ? 576 : 384;                       // 203-dpi receipt printers
+}
+function renderReceipt(shots, s, no) {
+  if (s.layout === 'strip4') return renderStrip4(shots, s, no);
+  const W = receiptWidth(s);
+  const dither = (s.printer || 'rawbt') === 'rawbt' ? true : s.dither === 'true';
+  const M = Math.round(W * 0.04);
+  const inner = W - M * 2;
+  const k = W / 384;
+  const mono = '"Courier New", Courier, monospace';
+
+  const ops = [];
+  let y = M;
+  const text = (t, size, opt = {}) => {
+    wrap(t, size, opt.bold !== false, inner).forEach(line => { ops.push({ k: 'text', t: line, size, y: y + size, bold: opt.bold !== false }); y += Math.round(size * 1.25); });
+  };
+  const gap = h => { y += Math.round(h * k); };
+  const rule = (ch = '-') => { ops.push({ k: 'rule', y: y + 10 * k, ch }); y += Math.round(18 * k); };
+  const pair = (l, r, size) => { ops.push({ k: 'pair', l, r, size, y: y + size }); y += Math.round(size * 1.3); };
+
+  const now = new Date();
+  const d = now.toLocaleDateString('en-PH', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const t = now.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+
+  text('*** ' + (s.shopName || 'Receipt Photobooth') + ' ***', Math.round(30 * k));
+  if (s.eventName) text(s.eventName.toUpperCase(), Math.round(20 * k));
+  gap(4); rule('=');
+  pair('RECEIPT #', String(no).padStart(6, '0'), Math.round(17 * k));
+  pair('DATE', d, Math.round(17 * k));
+  pair('TIME', t, Math.round(17 * k));
+  rule('-');
+  const ph = Math.round(inner * 3 / 4);
+  shots.forEach(c => { gap(6); ops.push({ k: 'photo', c, y, h: ph }); y += ph; gap(6); });
+  rule('-');
+  [['SMILES', 'x' + shots.length], ['GOOD VIBES', '100%'], ['MEMORIES', 'FREE']].forEach(([a, b]) => pair(a, b, Math.round(18 * k)));
+  rule('-');
+  pair('TOTAL', 'PRICELESS', Math.round(22 * k));
+  rule('=');
+  gap(6);
+  if (s.tagline) text(s.tagline, Math.round(18 * k));
+  gap(4);
+  ops.push({ k: 'barcode', y, h: Math.round(50 * k), no }); y += Math.round(50 * k);
+  text(String(no).padStart(6, '0'), Math.round(14 * k), { bold: false });
+  gap(6);
+  if (s.footer) text(s.footer, Math.round(17 * k));
+  gap(24);
+
+  const H = y + M;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#000'; x.textBaseline = 'alphabetic';
+  ops.forEach(o => {
+    if (o.k === 'text') {
+      x.font = (o.bold ? 'bold ' : '') + o.size + 'px ' + mono; x.textAlign = 'center'; x.fillText(o.t, W / 2, o.y);
+    } else if (o.k === 'pair') {
+      x.font = 'bold ' + o.size + 'px ' + mono;
+      x.textAlign = 'left'; x.fillText(o.l, M, o.y);
+      x.textAlign = 'right'; x.fillText(o.r, W - M, o.y);
+      const lw = x.measureText(o.l).width, rw = x.measureText(o.r).width;
+      x.textAlign = 'left';
+      const dotW = x.measureText('.').width, space = inner - lw - rw - dotW * 2;
+      if (space > dotW) x.fillText('.'.repeat(Math.floor(space / dotW)), M + lw + dotW, o.y);
+    } else if (o.k === 'rule') {
+      x.font = 'bold ' + Math.round(16 * k) + 'px ' + mono; x.textAlign = 'left';
+      const cw = x.measureText(o.ch).width; x.fillText(o.ch.repeat(Math.floor(inner / cw)), M, o.y);
+    } else if (o.k === 'photo') {
+      drawPhoto(x, o.c, M, o.y, inner, o.h, dither);
+    } else if (o.k === 'barcode') {
+      drawBarcode(x, M + inner * 0.1, o.y, inner * 0.8, o.h, o.no);
+    }
+  });
+  return cv;
+
+  function wrap(str, size, bold, maxW) {
+    x0.font = (bold ? 'bold ' : '') + size + 'px ' + mono;
+    const words = String(str).split(/\s+/); const out = []; let line = '';
+    words.forEach(w => { const test = line ? line + ' ' + w : w; if (x0.measureText(test).width > maxW && line) { out.push(line); line = w; } else line = test; });
+    if (line) out.push(line);
+    return out;
+  }
+}
+const x0 = document.createElement('canvas').getContext('2d');
+
+function drawPhoto(ctx, src, dx, dy, w, h, dither) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, w, h);
+  const im = x.getImageData(0, 0, w, h), p = im.data;
+  const g = new Float32Array(w * h);
+  let lo = 255, hi = 0;
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) { const v = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; g[j] = v; if (v < lo) lo = v; if (v > hi) hi = v; }
+  const range = Math.max(1, hi - lo);
+  for (let j = 0; j < g.length; j++) {
+    let v = (g[j] - lo) / range;
+    v = Math.pow(v, 0.9);
+    v = (v - 0.5) * 1.15 + 0.5;
+    g[j] = Math.max(0, Math.min(1, v)) * 255;
+  }
+  if (dither) {                                          // Atkinson dithering
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+      const j = yy * w + xx, old = g[j], nv = old < 128 ? 0 : 255, err = (old - nv) / 8;
+      g[j] = nv;
+      if (xx + 1 < w) g[j + 1] += err;
+      if (xx + 2 < w) g[j + 2] += err;
+      if (yy + 1 < h) { if (xx > 0) g[j + w - 1] += err; g[j + w] += err; if (xx + 1 < w) g[j + w + 1] += err; }
+      if (yy + 2 < h) g[j + 2 * w] += err;
+    }
+  }
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) { const v = g[j] < 0 ? 0 : g[j] > 255 ? 255 : g[j]; p[i] = p[i + 1] = p[i + 2] = v; p[i + 3] = 255; }
+  x.putImageData(im, 0, 0);
+  ctx.drawImage(c, dx, dy);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(dx, dy, w, 2); ctx.fillRect(dx, dy + h - 2, w, 2); ctx.fillRect(dx, dy, 2, h); ctx.fillRect(dx + w - 2, dy, 2, h);
+}
+
+function drawBarcode(ctx, x, y, w, h, no) {
+  let seed = Number(no) * 7919 + 17; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const bars = []; let total = 0;
+  while (total < w) { const b = 1 + Math.floor(rnd() * 4), s = 1 + Math.floor(rnd() * 3); bars.push([b, s]); total += b + s; }
+  let cx = x; ctx.fillStyle = '#000';
+  bars.forEach(([b, s]) => { if (cx + b <= x + w) ctx.fillRect(Math.round(cx), y, b, h); cx += b + s; });
+}
+
+/* ---------- 4-photo strip (vertical, 57/58 mm) ---------- */
+function eventDateText(s) {
+  return (s.eventDate && s.eventDate.trim()) || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+function renderStrip4(shots, s, no) {
+  const W = receiptWidth(s);
+  const dither = (s.printer || 'rawbt') === 'rawbt' ? true : s.dither === 'true';
+  const M = Math.round(W * 0.06), inner = W - M * 2;
+  const G = Math.round(W * 0.028), ph = Math.round(inner * 3 / 4);
+  const serif = 'Georgia, "Noto Serif", "Times New Roman", serif';
+  const sans = 'system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif';
+  const titleSize = Math.round(W * 0.09), dateSize = Math.round(W * 0.036), smallSize = Math.round(W * 0.03);
+  const titleFont = '400 ' + titleSize + 'px ' + serif;
+
+  const lines = wrapText(s.eventName || 'Photo Booth', titleFont, inner);
+  const lh = Math.round(titleSize * 1.12);
+  let y = M + Math.round(W * 0.02);
+  const titleTop = y; y += lines.length * lh;
+  const dateY = y + Math.round(dateSize * 1.2); y = dateY + Math.round(dateSize * 1.4);
+  const photoTop = y; y += 4 * ph + 3 * G;
+  const footY = y + Math.round(smallSize * 2.6);
+  const H = footY + M + Math.round(W * 0.05);              // tail before tearing
+
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#000'; x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+  x.font = titleFont;
+  lines.forEach((l, i) => x.fillText(l, W / 2, titleTop + titleSize + i * lh - Math.round(titleSize * 0.18)));
+  x.font = '600 ' + dateSize + 'px ' + sans;
+  x.fillText(spaced(eventDateText(s).toUpperCase()), W / 2, dateY);
+  for (let i = 0; i < 4; i++) {
+    const py = photoTop + i * (ph + G);
+    if (shots[i]) drawPhoto(x, shots[i], M, py, inner, ph, dither);
+    else { x.fillRect(M, py, inner, 2); x.fillRect(M, py + ph - 2, inner, 2); x.fillRect(M, py, 2, ph); x.fillRect(M + inner - 2, py, 2, ph); }
+  }
+  x.fillStyle = '#000';
+  x.font = '600 ' + smallSize + 'px ' + sans;
+  x.fillText(spaced((s.shopName || 'Receipt Photobooth').toUpperCase()) + '  ·  #' + String(no).padStart(6, '0'), W / 2, footY);
+  return cv;
+}
+function wrapText(str, font, maxW) {
+  x0.font = font;
+  const words = String(str).split(/\s+/); const out = []; let line = '';
+  words.forEach(w => { const t = line ? line + ' ' + w : w; if (x0.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t; });
+  if (line) out.push(line);
+  return out;
+}
+
+/* ---------- Colour strip for the QR download ---------- */
+function renderColorStrip(shots, s, no) {
+  const W = 1080, M = 56, G = 24, pw = W - M * 2, ph = Math.round(pw * 3 / 4);
+  const serif = 'Georgia, "Noto Serif", "Times New Roman", serif', sans = 'system-ui, -apple-system, Roboto, sans-serif';
+  const title = wrapText(s.eventName || 'Photo Booth', '400 64px ' + serif, pw);
+  const head = M + title.length * 74 + 70;
+  const H = head + shots.length * ph + (shots.length - 1) * G + 120;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#ece3d3'; x.fillRect(0, 0, W, H);                 // beige paper
+  x.fillStyle = '#141414'; x.textAlign = 'center';
+  x.font = '400 64px ' + serif;
+  title.forEach((l, i) => x.fillText(l, W / 2, M + 58 + i * 74));
+  x.font = '600 26px ' + sans; x.fillStyle = '#6f6758';
+  x.fillText(spaced(eventDateText(s).toUpperCase()), W / 2, M + title.length * 74 + 30);
+  x.imageSmoothingQuality = 'high';
+  shots.forEach((c, i) => x.drawImage(c, M, head + i * (ph + G), pw, ph));
+  const fy = head + shots.length * ph + (shots.length - 1) * G;
+  x.fillStyle = '#141414'; x.fillRect(M, fy + 44, pw, 2);
+  x.font = '600 22px ' + sans;
+  x.fillText(spaced((s.shopName || 'Receipt Photobooth').toUpperCase()) + '   ·   #' + String(no).padStart(6, '0'), W / 2, fy + 90);
+  return cv;
+}
+function spaced(t) { return String(t).split('').join(' '); }
+
+/* ---------- Settings ---------- */
+const BOOL = ['dither', 'mirror', 'autoPrint', 'saveToDrive', 'showQR'];
+const TXT = ['shopName', 'eventName', 'eventDate', 'layout', 'tagline', 'footer', 'printer', 'paper', 'camera', 'countdown', 'folderUrl'];
+let enteredPin = '';
+
+$('gear').onclick = () => {
+  pinOK = !S.hasPin;
+  $('pinGate').style.display = S.hasPin ? '' : 'none';
+  $('setForm').style.display = S.hasPin ? 'none' : '';
+  $('setSave').textContent = S.hasPin ? 'Unlock' : 'Save';
+  $('pinIn').value = ''; $('newPin').value = ''; $('setErr').textContent = '';
+  TXT.forEach(k => $('s_' + k).value = S[k] || '');
+  BOOL.forEach(k => $('s_' + k).checked = S[k] === 'true');
+  $('settings').classList.add('on');
+};
+$('setCancel').onclick = () => $('settings').classList.remove('on');
+$('setSave').onclick = async () => {
+  $('setErr').textContent = '';
+  if (!pinOK) {
+    enteredPin = $('pinIn').value;
+    if (await run('checkPin', enteredPin)) {
+      pinOK = true; $('pinGate').style.display = 'none'; $('setForm').style.display = ''; $('setSave').textContent = 'Save';
+    } else $('setErr').textContent = 'Wrong PIN';
+    return;
+  }
+  const o = {};
+  TXT.forEach(k => o[k] = $('s_' + k).value.trim());
+  BOOL.forEach(k => o[k] = $('s_' + k).checked ? 'true' : 'false');
+  if ($('newPin').value.trim()) o.newPin = $('newPin').value.trim();
+  $('setSave').disabled = true;
+  try {
+    S = await run('saveSettings', o, enteredPin);
+    applySettingsToUI();
+    $('settings').classList.remove('on');
+    startCamera();                                       // re-open if the camera choice changed
+  } catch (e) {
+    $('setErr').textContent = (e && e.message) || String(e);
+  } finally { $('setSave').disabled = false; }
+};
+</script>
+</body>
+</html>
