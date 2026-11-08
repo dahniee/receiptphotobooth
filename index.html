@@ -51,7 +51,7 @@
   #video { width:100%; height:100%; object-fit:cover; }
   #video.mirror { transform:scaleX(-1); }
   #count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    font:400 min(40vw,50vh)/1 var(--serif); color:#fff; text-shadow:0 0 40px rgba(0,0,0,.45); pointer-events:none; }
+    font:400 min(40vw,50vh)/1 var(--serif); color:#fff; pointer-events:none; }
   #flash { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; transition:opacity .4s; }
   #flash.go { opacity:1; transition:none; }
   #shotInfo { position:absolute; top:2vh; left:50%; transform:translateX(-50%); background:var(--bg); color:var(--ink);
@@ -64,7 +64,7 @@
   #review { flex-direction:row; gap:clamp(16px,4vw,64px); }
   #paperWrap { height:calc(100vh - 4vh); max-height:100%; display:flex; align-items:flex-start; }
   #receiptImg { display:block; height:100%; width:auto; max-width:38vw; object-fit:contain; object-position:top; background:#fff;
-    image-rendering:pixelated; box-shadow:0 1px 0 var(--soft), 0 12px 30px rgba(60,45,20,.18); -webkit-touch-callout:default; }
+    image-rendering:pixelated; outline:1px solid var(--soft); -webkit-touch-callout:default; }
   #side { display:flex; flex-direction:column; gap:2.2vh; width:min(500px,52vw); align-items:stretch; }
   #side h2 { margin:0; font:400 clamp(22px,4.6vh,42px)/1.1 var(--serif); }
   #copyBox { display:flex; flex-direction:column; gap:1.8vh; border-top:1.5px solid var(--line); padding-top:2.4vh; }
@@ -110,18 +110,17 @@
   @keyframes pulse { 50% { opacity:.3; } }
   @media (prefers-reduced-motion: reduce) { body.simple #tapHint { animation:none; } }
   body.simple #shotInfo { font:400 clamp(22px,5vh,46px)/1 var(--serif); letter-spacing:0; padding:10px 24px; }
-  body.simple #review { flex-direction:column; gap:2.4vh; padding:2.4vh 3vw; }
-  body.simple #paperWrap { height:auto; max-height:none; }
-  body.simple #receiptImg { height:calc(100vh - 4.8vh - 2.4vh - 22vh); max-width:none; }
-  body.simple #side { flex-direction:row; align-items:stretch; justify-content:center; width:auto; height:22vh; gap:2vw; }
+  body.simple #review { flex-direction:row; gap:clamp(20px,4vw,64px); padding:2.4vh 4vw; }
+  body.simple #paperWrap { height:calc(100vh - 4.8vh); }
+  body.simple #receiptImg { height:100%; max-width:none; }
+  body.simple #side { flex-direction:column; justify-content:center; align-items:stretch; width:min(400px,40vw); gap:2.4vh; }
   body.simple #copyBox, body.simple #printedBox, body.simple #shareBtn, body.simple #dialogPrintBtn, body.simple #reprintBtn, body.simple #status { display:none !important; }
-  body.simple #bigPrint { font-size:clamp(20px,4.2vh,38px); padding:0 7vw; min-width:28vw; }
-  body.simple #qrBox { padding:1.2vh 18px; gap:16px; }
-  body.simple #qr { width:calc(22vh - 2.4vh - 3px); height:calc(22vh - 2.4vh - 3px); padding:5px; }
-  body.simple #qrWait { align-self:center; max-width:16ch; }
-  body.simple .row2 { flex-direction:column; justify-content:center; gap:8px; }
-  body.simple .row2 button { flex:none; border:0; padding:6px 10px; color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
-  body.simple #shareHint { position:fixed; left:50%; bottom:calc(22vh + 5vh); transform:translateX(-50%); background:var(--paper); max-width:min(560px,90vw); z-index:3; }
+  body.simple #qrBox { flex-direction:column; text-align:center; gap:1.4vh; padding:2.4vh 20px; }
+  body.simple #qr { width:min(34vh,30vw); height:min(34vh,30vw); padding:6px; }
+  body.simple #qrWait { padding:2vh 0; }
+  body.simple .row2 { flex-direction:row; gap:12px; }
+  body.simple .row2 button { flex:1 1 0; padding:1.8vh 10px; font-size:clamp(15px,2.6vh,22px); }
+  body.simple #shareHint { font-size:clamp(13px,2vh,16px); }
   #thanks { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:var(--bg); z-index:8; font:400 clamp(36px,9vh,84px) var(--serif); }
   #thanks.on { display:flex; }
 
@@ -206,10 +205,10 @@
     <div id="shareHint" hidden>Press and hold the receipt → <b>Share image → Paperang</b> (or <b>Download image</b>, then print it from the Paperang app).</div>
     <button id="dialogPrintBtn" class="primary" hidden>Print</button>
 
-    <button id="bigPrint" class="primary" hidden>Print</button>
     <div id="qrBox" hidden><div id="qr"></div><div id="qrText"><b>Scan to download</b><span>your full-colour photo</span></div></div>
     <div id="qrWait" hidden>Preparing your download QR…</div>
     <div class="row2">
+      <button id="bigPrint" class="primary" hidden>Print</button>
       <button id="retakeBtn">Retake</button>
       <button id="reprintBtn" hidden>Print 1 more</button>
       <button id="doneBtn">Done</button>
@@ -281,7 +280,7 @@
    Hosted elsewhere (GitHub Pages etc. — use this if the live camera is blocked inside Apps Script):
    paste your Apps Script /exec URL below. Deployment access must be "Anyone".
    Neither: runs with sample data (for testing only). */
-const API_URL = '';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzF14l4AL5gA6HokJhwO2KM2LkY7g409s6vz-b11uD2lEXyvB60vGrSjcDLIvyH1D4sAA/exec';
 
 const IN_GAS = !!(window.google && google.script && google.script.run);
 const GS = IN_GAS ? null : (API_URL ? makeApi(API_URL) : makeMock());
