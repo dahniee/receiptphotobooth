@@ -13,6 +13,8 @@
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:var(--sans); overflow:hidden; }
   [hidden] { display:none !important; }
+  /* Hide the start screen until the real settings are in, so the default screen never flashes */
+  body.loading #start, body.loading #gear { visibility:hidden; }
   body:not(.clicker) .keys.ck { display:none; }
   .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; padding:2vh 3vw; }
   .screen.on { display:flex; }
@@ -122,6 +124,9 @@
   body.simple .row2 { flex-direction:row; gap:12px; }
   body.simple .row2 button { flex:1 1 0; padding:1.8vh 10px; font-size:clamp(15px,2.6vh,22px); }
   body.simple #shareHint { font-size:clamp(13px,2vh,16px); }
+  #holdMsg { text-align:center; font-size:clamp(14px,2.4vh,22px); line-height:1.45; }
+  #holdMsg b { font:400 clamp(22px,4.4vh,40px)/1.2 var(--serif); display:block; }
+  #holdMsg span { color:var(--muted); font-variant-numeric:tabular-nums; }
   #thanks { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:var(--bg); z-index:8; font:400 clamp(36px,9vh,84px) var(--serif); }
   #thanks.on { display:flex; }
 
@@ -142,7 +147,7 @@
   }
 </style>
 </head>
-<body>
+<body class="loading">
 
 <button id="gear" title="Settings">⚙︎</button>
 
@@ -206,6 +211,7 @@
     <div id="shareHint" hidden>Press and hold the receipt → <b>Share image → Paperang</b> (or <b>Download image</b>, then print it from the Paperang app).</div>
     <button id="dialogPrintBtn" class="primary" hidden>Print</button>
 
+    <div id="holdMsg" hidden></div>
     <div id="qrBox" hidden><div id="qr"></div><div id="qrText"><b>Scan to download</b><span>your full-colour photo</span></div></div>
     <div id="qrWait" hidden>Preparing your download QR…</div>
     <div class="row2">
@@ -234,7 +240,7 @@
       </div>
       <div class="grid2">
         <div class="row"><label for="s_layout">Layout</label>
-          <select id="s_layout"><option value="receipt">Receipt (guest picks 1–3 frames)</option><option value="strip4">Photo strip — 4 photos</option></select></div>
+          <select id="s_layout"><option value="receipt">Receipt (guest picks 1–3 frames)</option><option value="strip3">Photo strip — 3 photos</option><option value="strip4">Photo strip — 4 photos</option></select></div>
         <div class="row"><label for="s_eventDate">Date on the print (blank = today)</label><input type="text" id="s_eventDate" placeholder="November 28, 2026"></div>
       </div>
       <div class="row"><label for="s_tagline">Tagline (receipt layout)</label><input type="text" id="s_tagline"></div>
@@ -305,7 +311,7 @@ function run(fn, ...args) {
 }
 function makeMock() {
   let n = 0; const log = {};
-  const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip4', tagline:'Thank you for coming!', footer:'Tag us @sdsprints',
+  const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip3', tagline:'Thank you for coming!', footer:'Tag us @sdsprints',
     printer:'paperang', paper:'58', camera:'back', countdown:'3', dither:'false', mirror:'true', autoPrint:'false',
     saveToDrive:'true', showQR:'true', folderUrl:'', hasPin:false, maxCopies:4 };
   return {
@@ -346,8 +352,15 @@ function show(id) {
 
 /* ---------- Init ---------- */
 (async function init() {
-  try { S = await run('getSettings'); } catch (e) { S = await makeMock().getSettings(); }
-  applySettingsToUI();
+  await Promise.resolve();               // let the rest of the script load first
+  // 1) Show the last-used settings instantly (saved on this device), 2) then refresh from Apps Script
+  try { const c = localStorage.getItem('boothSettings'); if (c) { S = JSON.parse(c); applySettingsToUI(); document.body.classList.remove('loading'); } } catch (e) {}
+  try {
+    S = await run('getSettings');
+    try { localStorage.setItem('boothSettings', JSON.stringify(S)); } catch (e) {}
+  } catch (e) { if (!S) S = await makeMock().getSettings(); }
+  if (mode === 'start') applySettingsToUI();
+  document.body.classList.remove('loading');
   startCamera();                        // warm up the camera so the first countdown starts instantly
 })();
 
@@ -356,19 +369,20 @@ function applySettingsToUI() {
   $('eventTitle').textContent = S.eventName || '';
   $('video').classList.toggle('mirror', S.mirror === 'true');
   $('fileIn').setAttribute('capture', cameraChoice() === 'front' ? 'user' : 'environment');
-  const strip4 = isStrip4();
+  const strip4 = isStrip4();            // any photo-strip layout (3 or 4 photos)
   document.body.classList.toggle('simple', strip4);
   $('eventDateLine').textContent = eventDateText(S);
   document.querySelectorAll('.frameBtn').forEach(b => b.hidden = strip4 ? b.dataset.n !== '4' : b.dataset.n === '4');
-  $('frameTitle').textContent = strip4 ? 'Get ready for 4 photos!' : 'Choose your frames';
+  $('frameTitle').textContent = strip4 ? 'Get ready for ' + stripCount() + ' photos!' : 'Choose your frames';
   $('startKeys').innerHTML = strip4 ? (hasClicker ? 'Clicker: <kbd>▶</kbd> start' : '')
                                      : 'Tap a frame to start' + (hasClicker ? ' · Clicker: <kbd>◀</kbd> change · <kbd>▶</kbd> start' : '');
-  if (strip4) chosenN = 4; else if (chosenN > 3) chosenN = 3;
+  if (strip4) chosenN = stripCount(); else if (chosenN > 3) chosenN = 3;
   selectFrame(chosenN);
   // Paperang mode uses the same copies picker; the button hands the receipt to the Paperang app
   $('printBtn').textContent = printerMode() === 'paperang' ? 'Print in Paperang' : 'Print';
 }
-function isStrip4() { return S && S.layout === 'strip4'; }
+function isStrip4() { return !!S && (S.layout === 'strip4' || S.layout === 'strip3'); }   // photo-strip layouts
+function stripCount() { return S && S.layout === 'strip3' ? 3 : 4; }
 let hasClicker = false;   // becomes true after the first clicker/keyboard press — then clicker hints are shown
 
 function selectFrame(n) {
@@ -432,7 +446,7 @@ document.querySelectorAll('.frameBtn').forEach(b => b.onclick = () => { selectFr
 // 4-photo strip: tap anywhere on the start screen
 $('start').addEventListener('click', (e) => {
   if (!isStrip4() || !$('fallbackBox').hidden || e.target.closest('button')) return;
-  selectFrame(4); begin();
+  selectFrame(stripCount()); begin();
 });
 function begin() { keepAwake(); if (camFailed) startFallback(); else startSession(); }
 
@@ -617,7 +631,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !sharePending || mode !== 'review') return;
   if (isStrip4()) {
     // wait a moment: Android reports "app chosen" just before or after Chrome comes back
-    setTimeout(() => { if (shareDone && sharePending) { sharePending = false; thankAndHome(); } }, 900);
+    setTimeout(() => { if (shareDone && sharePending) { sharePending = false; startQrHold(); } }, 900);
     return;
   }
   sharePending = false;
@@ -641,11 +655,23 @@ $('bigPrint').onclick = async () => {
   if (!printed) logCopies(1);
   printed = true;
   $('doneBtn').hidden = false; $('retakeBtn').hidden = true;
-  if (pm === 'rawbt') { sendToRawBT(escposFromCanvas(lastStrip.canvas, 1)); $('bigPrint').textContent = 'Print again'; setTimeout(thankAndHome, 4000); return; }
+  if (pm === 'rawbt') { sendToRawBT(escposFromCanvas(lastStrip.canvas, 1)); $('bigPrint').textContent = 'Print again'; setTimeout(startQrHold, 3000); return; }
   $('bigPrint').textContent = 'Print again';
   sharePending = true;
   await shareImage();
 };
+// After printing: keep the preview + QR on screen so guests can scan, then start over
+const QR_HOLD_SECONDS = 25;
+let holdTimer = null;
+function startQrHold() {
+  if (mode !== 'review') return;
+  clearInterval(holdTimer);
+  let left = QR_HOLD_SECONDS;
+  const msg = () => { $('holdMsg').innerHTML = '<b>Thank you!</b> Scan the QR code to download your photo.<br><span>Starting over in ' + left + ' s</span>'; };
+  $('holdMsg').hidden = false; msg();
+  resetIdle((QR_HOLD_SECONDS + 10) * 1000);
+  holdTimer = setInterval(() => { left--; if (left <= 0) { clearInterval(holdTimer); goHome(); } else msg(); }, 1000);
+}
 function thankAndHome() {
   if (mode !== 'review') return;
   $('thanks').classList.add('on');
@@ -659,7 +685,7 @@ $('retakeBtn').onclick = retake;
 $('doneBtn').onclick = goHome;
 
 function goHome() {
-  clearTimeout(idleTimer); clearInterval(backTimer); backTimer = null; sharePending = false; shareDone = false;
+  clearTimeout(idleTimer); clearInterval(holdTimer); holdTimer = null; $('holdMsg').hidden = true; clearInterval(backTimer); backTimer = null; sharePending = false; shareDone = false;
   photos = []; lastStrip = null; printed = false; busy = false;
   $('fallbackBox').hidden = true; $('frameChoice').hidden = false; $('frameTitle').hidden = false; $('startKeys').hidden = false;
   applySettingsToUI();
@@ -768,7 +794,7 @@ function receiptWidth(s) {
   return s.paper === '80' ? 576 : 384;                       // 203-dpi receipt printers
 }
 function renderReceipt(shots, s, no) {
-  if (s.layout === 'strip4') return renderStrip4(shots, s, no);
+  if (s.layout === 'strip4' || s.layout === 'strip3') return renderStrip4(shots, s, no);
   const W = receiptWidth(s);
   const dither = (s.printer || 'rawbt') === 'rawbt' ? true : s.dither === 'true';
   const M = Math.round(W * 0.04);
@@ -898,8 +924,10 @@ function eventDateText(s) {
 function renderStrip4(shots, s, no) {
   const W = receiptWidth(s);
   const dither = (s.printer || 'rawbt') === 'rawbt' ? true : s.dither === 'true';
-  const M = Math.round(W * 0.06), inner = W - M * 2;
-  const G = Math.round(W * 0.028), ph = Math.round(inner * 3 / 4);
+  const n = s.layout === 'strip3' ? 3 : 4;
+  // Very small margins: the Paperang app / printer already add their own white border
+  const M = Math.round(W * 0.015), inner = W - M * 2;
+  const G = Math.round(W * 0.02), ph = Math.round(inner * 3 / 4);
   const serif = 'Georgia, "Noto Serif", "Times New Roman", serif';
   const sans = 'system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif';
   const titleSize = Math.round(W * 0.09), dateSize = Math.round(W * 0.036), smallSize = Math.round(W * 0.03);
@@ -907,12 +935,12 @@ function renderStrip4(shots, s, no) {
 
   const lines = wrapText(s.eventName || 'Photo Booth', titleFont, inner);
   const lh = Math.round(titleSize * 1.12);
-  let y = M + Math.round(W * 0.02);
+  let y = Math.round(W * 0.012);
   const titleTop = y; y += lines.length * lh;
-  const dateY = y + Math.round(dateSize * 1.2); y = dateY + Math.round(dateSize * 1.4);
-  const photoTop = y; y += 4 * ph + 3 * G;
-  const footY = y + Math.round(smallSize * 2.6);
-  const H = footY + M + Math.round(W * 0.05);              // tail before tearing
+  const dateY = y + Math.round(dateSize * 1.1); y = dateY + Math.round(dateSize * 1.0);
+  const photoTop = y; y += n * ph + (n - 1) * G;
+  const footY = y + Math.round(smallSize * 1.9);
+  const H = footY + Math.round(smallSize * 0.5);
 
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
@@ -922,7 +950,7 @@ function renderStrip4(shots, s, no) {
   lines.forEach((l, i) => x.fillText(l, W / 2, titleTop + titleSize + i * lh - Math.round(titleSize * 0.18)));
   x.font = '600 ' + dateSize + 'px ' + sans;
   x.fillText(spaced(eventDateText(s).toUpperCase()), W / 2, dateY);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < n; i++) {
     const py = photoTop + i * (ph + G);
     if (shots[i]) drawPhoto(x, shots[i], M, py, inner, ph, dither);
     else { x.fillRect(M, py, inner, 2); x.fillRect(M, py + ph - 2, inner, 2); x.fillRect(M, py, 2, ph); x.fillRect(M + inner - 2, py, 2, ph); }
@@ -997,6 +1025,7 @@ $('setSave').onclick = async () => {
   $('setSave').disabled = true;
   try {
     S = await run('saveSettings', o, enteredPin);
+    try { localStorage.setItem('boothSettings', JSON.stringify(S)); } catch (e) {}
     applySettingsToUI();
     $('settings').classList.remove('on');
     startCamera();                                       // re-open if the camera choice changed
