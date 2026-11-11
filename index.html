@@ -144,6 +144,16 @@
   .assetRow img { height:52px; max-width:120px; object-fit:contain; border:1px solid var(--soft); background:#fff; }
   .assetRow button { padding:8px 14px; }
   .assetStatus { color:var(--muted); font-size:13px; }
+  /* Guest download screen */
+  #guest { justify-content:flex-start; overflow:auto; padding-block:4vh 6vh; }
+  .gWrap { display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; max-width:560px; text-align:center; }
+  #gLabel { font:600 12px var(--sans); letter-spacing:.3em; text-transform:uppercase; }
+  #gTitle { font-family:var(--titleFont, var(--serif)); font-weight:var(--titleWeight, 400); font-size:clamp(28px,8vw,42px); line-height:1.1; }
+  #gDate { font:600 13px var(--sans); letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
+  #gImg { width:auto; max-width:100%; max-height:62vh; outline:1px solid var(--soft); -webkit-touch-callout:default; }
+  #gMsg { color:var(--muted); }
+  #gSave { width:100%; font-size:20px; padding:16px; }
+  #gHint { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
   #thanks { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:var(--bg); z-index:8; font:400 clamp(36px,9vh,84px) var(--serif); }
   #thanks.on { display:flex; }
 
@@ -188,6 +198,19 @@
     <p id="fallbackText"></p>
     <button id="startBtn" class="primary">Take photo 1 of 3</button>
     <button id="backBtn" style="background:transparent;color:var(--muted)">← Change frames</button>
+  </div>
+</div>
+
+<!-- GUEST DOWNLOAD (opened from the QR code: ?photo=<id>) -->
+<div id="guest" class="screen">
+  <div class="gWrap">
+    <div id="gLabel"></div>
+    <div id="gTitle"></div>
+    <div id="gDate"></div>
+    <img id="gImg" alt="Your photo" hidden>
+    <div id="gMsg">Loading your photo…</div>
+    <button id="gSave" class="primary" hidden>Save to my phone</button>
+    <p id="gHint" hidden></p>
   </div>
 </div>
 
@@ -316,6 +339,8 @@
       <div class="row check"><input type="checkbox" id="s_autoPrint"><label for="s_autoPrint">Open print dialog automatically (Print-dialog mode only)</label></div>
       <h3>Saving &amp; download</h3>
       <div class="row check"><input type="checkbox" id="s_showQR"><label for="s_showQR">Show QR so guests can download the colour photo</label></div>
+      <div class="row"><label for="s_qrLink">The QR code opens</label>
+        <select id="s_qrLink"><option value="booth">A page with a “Save to my phone” button (recommended)</option><option value="drive">The colour photo in Google Drive</option></select></div>
       <div class="row check"><input type="checkbox" id="s_saveToDrive"><label for="s_saveToDrive">Also save the receipt image to Drive</label></div>
       <div class="row"><label for="s_folderUrl">Drive folder link (optional — blank = booth makes its own)</label><input type="text" id="s_folderUrl" placeholder="https://drive.google.com/drive/folders/…"></div>
       <div class="row"><label for="newPin">New PIN (blank = keep)</label><input type="password" id="newPin" inputmode="numeric" placeholder="unchanged"></div>
@@ -365,7 +390,7 @@ function makeMock() {
   let n = 0; const log = {};
   const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip3', tagline:'Thank you for coming!', footer:'Tag us @sdsprints', titleFont:'georgia', titleSize:'100', dateSize:'100', textColor:'#141414', bgColor:'#ece3d3', bgDim:'0', startPos:'center', showLabel:'true', showDate:'true', tapText:'Tap to start', logoSize:'100', logoOnStart:'true', logoOnPrint:'false', bgImage:'', logoImage:'',
     printer:'paperang', paper:'58', camera:'front', countdown:'3', qrSeconds:'30', dither:'false', mirror:'true', autoPrint:'false',
-    saveToDrive:'true', showQR:'true', folderUrl:'', hasPin:false, maxCopies:4 };
+    saveToDrive:'true', showQR:'true', qrLink:'booth', folderUrl:'', hasPin:false, maxCopies:4 };
   return {
     getSettings: async () => ({ ...st }),
     saveSettings: async (o) => (Object.assign(st, o), { ...st }),
@@ -399,6 +424,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const MAXC = () => Number((S && S.maxCopies) || 4);
 const printerMode = () => (S && S.printer) || 'rawbt';
 
+// Address of this page for guest downloads (only when hosted on a normal website such as GitHub Pages)
+function guestBase() {
+  if (IN_GAS || !/^https:$/.test(location.protocol)) return '';
+  return location.origin + location.pathname;
+}
 function show(id) {
   mode = id;
   document.querySelectorAll('.screen').forEach(e => e.classList.toggle('on', e.id === id));
@@ -406,8 +436,10 @@ function show(id) {
 }
 
 /* ---------- Init ---------- */
+const GUEST_ID = new URLSearchParams(location.search).get('photo');
 (async function init() {
   await Promise.resolve();               // let the rest of the script load first
+  if (GUEST_ID) { guestInit(); return; } // opened from a QR code: show the download screen, no camera
   // 1) Show the last-used settings instantly (saved on this device), 2) then refresh from Apps Script
   try { const c = localStorage.getItem('boothSettings'); if (c) { S = JSON.parse(c); applySettingsToUI(); document.body.classList.remove('loading'); } } catch (e) {}
   try {
@@ -682,7 +714,12 @@ async function finish() {
   const canvas = renderReceipt(photos, S, no);
   const dataUrl = canvas.toDataURL('image/png');
   lastStrip = { dataUrl, canvas, receiptNo: no };
-  $('receiptImg').src = dataUrl;
+  // Show guests the full-colour version (the one they download). The printer still gets the black & white strip.
+  const wantQR = S.showQR === 'true';
+  const colourPreview = qrOnly || isStrip4();
+  const colorUrl = (wantQR || colourPreview) ? renderColorStrip(photos, S, no).toDataURL('image/jpeg', 0.88) : '';
+  $('receiptImg').src = colourPreview ? colorUrl : dataUrl;
+  $('receiptImg').style.imageRendering = colourPreview ? 'auto' : '';
   $('printImg').src = dataUrl;
   $('printImg').style.width = (S.paper === '80' ? 72 : 48) + 'mm';
   $('bigPrint').disabled = false;
@@ -692,12 +729,10 @@ async function finish() {
   if (pm === 'browser' && S.autoPrint === 'true') setTimeout(dialogPrint, 400);
 
   // Upload in the background: colour strip for the QR download (+ receipt image)
-  const wantQR = S.showQR === 'true';
   if (!wantQR && S.saveToDrive !== 'true' && !qrOnly) return;
-  const colorUrl = wantQR ? renderColorStrip(photos, S, no).toDataURL('image/jpeg', 0.88) : '';
   const thisNo = no;
   try {
-    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length, baseUrl: API_URL, keepReceipt: qrOnly }, colorUrl);
+    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length, baseUrl: API_URL, keepReceipt: qrOnly, guestBase: guestBase() }, colorUrl);
     if (!lastStrip || lastStrip.receiptNo !== thisNo) return;          // guest already moved on
     $('qrWait').hidden = true;
     if (wantQR && r.downloadUrl && window.QRCode) {
@@ -1172,7 +1207,7 @@ function spaced(t) { return String(t).split('').join(' '); }
 
 /* ---------- Settings ---------- */
 const BOOL = ['dither', 'mirror', 'autoPrint', 'saveToDrive', 'showQR', 'showLabel', 'showDate', 'logoOnStart', 'logoOnPrint'];
-const TXT = ['shopName', 'eventName', 'eventDate', 'layout', 'tagline', 'footer', 'printer', 'paper', 'camera', 'countdown', 'qrSeconds', 'folderUrl',
+const TXT = ['shopName', 'eventName', 'eventDate', 'layout', 'tagline', 'footer', 'printer', 'paper', 'camera', 'countdown', 'qrSeconds', 'qrLink', 'folderUrl',
              'titleFont', 'titleSize', 'dateSize', 'startPos', 'textColor', 'bgColor', 'tapText', 'bgDim', 'logoSize'];
 let enteredPin = '';
 
@@ -1255,6 +1290,47 @@ function refreshAssetRows() {
     $(p + 'Remove').hidden = !S[kind];
   });
 }
+
+/* ---------- Guest download screen (QR code → this page with ?photo=<id>) ---------- */
+let guestBlob = null;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+async function guestInit() {
+  document.body.classList.remove('loading');
+  show('guest');
+  try { S = await run('getSettings'); applyLook(); } catch (e) {}
+  if (S) {
+    $('gLabel').textContent = S.shopName || '';
+    $('gTitle').textContent = S.eventName || '';
+    $('gDate').textContent = eventDateText(S);
+  }
+  try {
+    const data = await run('getAsset', GUEST_ID);
+    if (!data) throw new Error('missing');
+    guestBlob = await (await fetch(data)).blob();
+    $('gImg').src = URL.createObjectURL(guestBlob);
+    $('gImg').hidden = false;
+    $('gMsg').hidden = true;
+    $('gSave').hidden = false;
+    $('gHint').hidden = false;
+    $('gHint').textContent = isIOS ? 'Tap “Save to my phone”, then choose “Save Image”. Or press and hold the photo → “Save to Photos”.'
+                                   : 'Your photo saves to your phone’s Downloads — you’ll find it in Gallery (Download album). Or press and hold the photo → “Download image”.';
+  } catch (e) {
+    $('gMsg').textContent = 'Sorry, this photo isn’t available. Please check your internet connection and scan the QR code again.';
+  }
+}
+$('gSave').onclick = async () => {
+  if (!guestBlob) return;
+  const name = ((S && S.eventName) || 'Photobooth').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') + '.jpg';
+  const file = new File([guestBlob], name, { type: guestBlob.type || 'image/jpeg' });
+  // iPhone/iPad: the share sheet has "Save Image" → Photos. Android: a normal download lands in Gallery › Download.
+  if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(guestBlob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  $('gSave').textContent = 'Saved ✓  Tap to save again';
+};
 </script>
 </body>
 </html>
