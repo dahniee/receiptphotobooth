@@ -300,6 +300,7 @@
             <option value="rawbt">Receipt printer via RawBT (Android, auto print)</option>
             <option value="paperang">Paperang / printer app (Save / Share)</option>
             <option value="browser">Printer via Print dialog</option>
+            <option value="none">No printing — QR only (print later from the sheet)</option>
           </select></div>
         <div class="row"><label for="s_paper">Paper roll</label>
           <select id="s_paper"><option value="58">58 mm</option><option value="80">80 mm</option></select></div>
@@ -307,6 +308,8 @@
           <select id="s_camera"><option value="back">Back camera (best quality)</option><option value="front">Front camera</option></select></div>
         <div class="row"><label for="s_countdown">Countdown (seconds)</label>
           <select id="s_countdown"><option>2</option><option>3</option><option>5</option><option>10</option></select></div>
+        <div class="row"><label for="s_qrSeconds">Time to scan the QR (seconds)</label>
+          <select id="s_qrSeconds"><option>15</option><option>20</option><option>25</option><option>30</option><option>45</option><option>60</option></select></div>
       </div>
       <div class="row check"><input type="checkbox" id="s_mirror"><label for="s_mirror">Mirror the live preview (selfie view)</label></div>
       <div class="row check"><input type="checkbox" id="s_dither"><label for="s_dither">Dot look (Paperang / Print-dialog modes only; RawBT always uses dots)</label></div>
@@ -361,7 +364,7 @@ function run(fn, ...args) {
 function makeMock() {
   let n = 0; const log = {};
   const st = { shopName:'Receipt Photobooth', eventName:'Worker’s Appreciation', eventDate:'November 28, 2026', layout:'strip3', tagline:'Thank you for coming!', footer:'Tag us @sdsprints', titleFont:'georgia', titleSize:'100', dateSize:'100', textColor:'#141414', bgColor:'#ece3d3', bgDim:'0', startPos:'center', showLabel:'true', showDate:'true', tapText:'Tap to start', logoSize:'100', logoOnStart:'true', logoOnPrint:'false', bgImage:'', logoImage:'',
-    printer:'paperang', paper:'58', camera:'front', countdown:'3', dither:'false', mirror:'true', autoPrint:'false',
+    printer:'paperang', paper:'58', camera:'front', countdown:'3', qrSeconds:'30', dither:'false', mirror:'true', autoPrint:'false',
     saveToDrive:'true', showQR:'true', folderUrl:'', hasPin:false, maxCopies:4 };
   return {
     getSettings: async () => ({ ...st }),
@@ -668,8 +671,10 @@ async function finish() {
   $('retakeBtn').hidden = false; $('reprintBtn').hidden = true;
   $('reprintBtn').textContent = pm === 'paperang' ? 'Share again' : 'Print 1 more';
   const simple = isStrip4();
-  $('bigPrint').hidden = !simple; $('bigPrint').textContent = 'Print'; $('bigPrint').disabled = true;
-  $('doneBtn').hidden = simple; shareDone = false;
+  const qrOnly = pm === 'none';
+  $('bigPrint').hidden = !simple || qrOnly; $('bigPrint').textContent = 'Print'; $('bigPrint').disabled = true;
+  $('doneBtn').hidden = simple && !qrOnly; shareDone = false;
+  if (qrOnly) { $('copyBox').hidden = true; $('dialogPrintBtn').hidden = true; }
 
   let no;
   try { no = await run('nextReceiptNo'); } catch (e) { no = Math.floor(Date.now() / 1000) % 1000000; }
@@ -688,11 +693,11 @@ async function finish() {
 
   // Upload in the background: colour strip for the QR download (+ receipt image)
   const wantQR = S.showQR === 'true';
-  if (!wantQR && S.saveToDrive !== 'true') return;
+  if (!wantQR && S.saveToDrive !== 'true' && !qrOnly) return;
   const colorUrl = wantQR ? renderColorStrip(photos, S, no).toDataURL('image/jpeg', 0.88) : '';
   const thisNo = no;
   try {
-    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length }, colorUrl);
+    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length, baseUrl: API_URL, keepReceipt: qrOnly }, colorUrl);
     if (!lastStrip || lastStrip.receiptNo !== thisNo) return;          // guest already moved on
     $('qrWait').hidden = true;
     if (wantQR && r.downloadUrl && window.QRCode) {
@@ -700,10 +705,12 @@ async function finish() {
       $('qrBox').hidden = false;
     }
     $('status').textContent = 'Saved ✓ #' + String(no).padStart(6, '0');
+    if (qrOnly) startQrHold();
   } catch (e) {
     if (lastStrip && lastStrip.receiptNo === thisNo) {
       $('qrWait').hidden = true;
       $('status').textContent = 'Couldn’t upload (no internet?) — the receipt still prints.';
+      if (qrOnly) { $('holdMsg').hidden = false; $('holdMsg').innerHTML = '<b>Couldn’t save the photo</b>Check the internet connection, then tap Retake or Done.'; }
     }
   }
 }
@@ -797,15 +804,16 @@ $('bigPrint').onclick = async () => {
   await shareImage();
 };
 // After printing: keep the preview + QR on screen so guests can scan, then start over
-const QR_HOLD_SECONDS = 25;
+const QR_HOLD_DEFAULT = 30;   // ⚙︎ → Time to scan the QR
 let holdTimer = null;
 function startQrHold() {
   if (mode !== 'review') return;
   clearInterval(holdTimer);
-  let left = QR_HOLD_SECONDS;
+  const total = Number(S && S.qrSeconds) || QR_HOLD_DEFAULT;
+  let left = total;
   const msg = () => { $('holdMsg').innerHTML = '<b>Thank you!</b> Scan the QR code to download your photo.<br><span>Starting over in ' + left + ' s</span>'; };
   $('holdMsg').hidden = false; msg();
-  resetIdle((QR_HOLD_SECONDS + 10) * 1000);
+  resetIdle((total + 10) * 1000);
   holdTimer = setInterval(() => { left--; if (left <= 0) { clearInterval(holdTimer); goHome(); } else msg(); }, 1000);
 }
 function thankAndHome() {
@@ -816,7 +824,10 @@ function thankAndHome() {
 // Any tap on the review screen cancels the automatic restart (e.g. to share again)
 document.addEventListener('pointerdown', (e) => { if (backTimer && e.target && e.target.id !== 'doneBtn') { clearInterval(backTimer); backTimer = null; $('printedText').textContent = 'Tap Done when finished.'; } }, true);
 
-function retake() { clearTimeout(idleTimer); lastStrip = null; show('start'); begin(); }
+function retake() {
+  clearTimeout(idleTimer); clearInterval(holdTimer); holdTimer = null; clearInterval(backTimer); backTimer = null; sharePending = false;
+  $('holdMsg').hidden = true; lastStrip = null; show('start'); begin();
+}
 $('retakeBtn').onclick = retake;
 $('doneBtn').onclick = goHome;
 
@@ -861,6 +872,7 @@ function onClicker(act) {
     if (act === 'retake') cancelled = true;
   } else if (mode === 'review') {
     if (busy) return;
+    if (printerMode() === 'none') { if (act === 'next') goHome(); else if (act === 'retake') retake(); return; }
     if (isStrip4()) { if (act === 'next') $('bigPrint').click(); else if (act === 'retake' && !printed) retake(); return; }
     const pm = printerMode();
     if (printed || pm === 'browser') {
@@ -1160,7 +1172,7 @@ function spaced(t) { return String(t).split('').join(' '); }
 
 /* ---------- Settings ---------- */
 const BOOL = ['dither', 'mirror', 'autoPrint', 'saveToDrive', 'showQR', 'showLabel', 'showDate', 'logoOnStart', 'logoOnPrint'];
-const TXT = ['shopName', 'eventName', 'eventDate', 'layout', 'tagline', 'footer', 'printer', 'paper', 'camera', 'countdown', 'folderUrl',
+const TXT = ['shopName', 'eventName', 'eventDate', 'layout', 'tagline', 'footer', 'printer', 'paper', 'camera', 'countdown', 'qrSeconds', 'folderUrl',
              'titleFont', 'titleSize', 'dateSize', 'startPos', 'textColor', 'bgColor', 'tapText', 'bgDim', 'logoSize'];
 let enteredPin = '';
 
