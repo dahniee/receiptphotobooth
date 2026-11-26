@@ -149,12 +149,12 @@
   .assetRow button { padding:8px 14px; }
   .assetStatus { color:var(--muted); font-size:13px; }
   /* Guest download screen */
-  #guest { justify-content:flex-start; overflow:auto; padding-block:4vh 6vh; }
+  #guest { justify-content:center; overflow:auto; padding-block:3vh 4vh; }
   .gWrap { display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; max-width:560px; text-align:center; }
   #gLabel { font:600 12px var(--sans); letter-spacing:.3em; text-transform:uppercase; }
   #gTitle { font-family:var(--titleFont, var(--serif)); font-weight:var(--titleWeight, 400); font-size:clamp(28px,8vw,42px); line-height:1.1; }
   #gDate { font:600 13px var(--sans); letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
-  #gImg { width:auto; max-width:100%; max-height:62vh; outline:1px solid var(--soft); -webkit-touch-callout:default; }
+  #gImg { width:auto; max-width:100%; max-height:80vh; outline:1px solid var(--soft); -webkit-touch-callout:default; }
   #gMsg { color:var(--muted); }
   #gSave { width:100%; font-size:20px; padding:16px; }
   #gHint { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
@@ -212,7 +212,7 @@
     <div id="gTitle"></div>
     <div id="gDate"></div>
     <img id="gImg" alt="Your photo" hidden>
-    <div id="gMsg">Loading your photo…</div>
+    <div id="gMsg">Loading…</div>
     <button id="gSave" class="primary" hidden>Save to my phone</button>
     <p id="gHint" hidden></p>
   </div>
@@ -1328,11 +1328,8 @@ async function guestInit() {
   show('guest');
   try { S = await run('getSettings'); applyLook(); } catch (e) {}
   if (S && S.bgImage) run('getAsset', S.bgImage).then(d => { if (d) { storeAsset(S.bgImage, d); applyLook(); } }).catch(() => {});
-  if (S) {
-    $('gLabel').textContent = S.shopName || '';
-    $('gTitle').textContent = S.eventName || '';
-    $('gDate').textContent = eventDateText(S);
-  }
+  // Only the photo and the Save button are shown to guests
+  $('gLabel').hidden = true; $('gTitle').hidden = true; $('gDate').hidden = true;
   try {
     const data = await run('getAsset', GUEST_ID);
     if (!data) throw new Error('missing');
@@ -1341,9 +1338,6 @@ async function guestInit() {
     $('gImg').hidden = false;
     $('gMsg').hidden = true;
     $('gSave').hidden = false;
-    $('gHint').hidden = false;
-    $('gHint').textContent = isIOS ? 'Tap “Save to my phone”, then choose “Save Image”. Or press and hold the photo → “Save to Photos”.'
-                                   : 'Your photo saves to your phone’s Downloads — you’ll find it in Gallery (Download album). Or press and hold the photo → “Download image”.';
   } catch (e) {
     $('gMsg').textContent = 'Sorry, this photo isn’t available. Please check your internet connection and scan the QR code again.';
   }
