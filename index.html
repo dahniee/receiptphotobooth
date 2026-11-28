@@ -388,7 +388,10 @@ const IN_GAS = !!(window.google && google.script && google.script.run);
 const GS = IN_GAS ? null : (API_URL ? makeApi(API_URL) : makeMock());
 function makeApi(url) {
   const call = fn => async (...args) => {
-    const r = await fetch(url, { method: 'POST', body: JSON.stringify({ fn, args }) });   // text/plain → no CORS preflight
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 90000);       // give up after 90 s (bad signal)
+    let r;
+    try { r = await fetch(url, { method: 'POST', body: JSON.stringify({ fn, args }), signal: ctl.signal }); }   // text/plain → no CORS preflight
+    finally { clearTimeout(timer); }
     const j = await r.json();
     if (j.error) throw new Error(j.error);
     return j.result;
@@ -642,7 +645,7 @@ function begin() { keepAwake(); if (camFailed) startFallback(); else startSessio
 // Camera-app fallback (if the live camera is blocked). Opening the camera app must happen straight from a tap/key.
 function startFallback() {
   if (busy) return;
-  photos = []; cancelled = false;
+  photos = []; cancelled = false; sessionId++;
   showFallbackStep();
   $('fileIn').click();
 }
@@ -657,7 +660,7 @@ $('backBtn').onclick = () => goHome();
 
 async function startSession() {
   if (busy) return;
-  busy = true; cancelled = false; photos = [];
+  busy = true; cancelled = false; photos = []; sessionId++;
   $('thumbs').innerHTML = '';
   const ok = await startCamera();
   if (!ok) { busy = false; camFailed = true; showFallbackStep(); return; }
@@ -708,12 +711,36 @@ function flash() {
 }
 
 /* ---------- Review & print ---------- */
+let sessionId = 0;                     // changes every time a new photo session starts
+async function runRetry(fn, args, tries, waitMs) {
+  let err;
+  for (let i = 0; i < tries; i++) {
+    try { return await run(fn, ...args); } catch (e) { err = e; if (i < tries - 1) await sleep(waitMs * (i + 1)); }
+  }
+  throw err;
+}
+// Uploads that failed (bad internet) are kept and retried in the background, so no photo is lost
+const pendingUploads = [];
+async function flushPending() {
+  while (pendingUploads.length) {
+    const job = pendingUploads[0];
+    try { await run('saveStrip', ...job); pendingUploads.shift(); } catch (e) { return; }
+  }
+}
+setInterval(flushPending, 30000);
+
 async function finish() {
+  const shots = photos.slice();                    // keep this group's photos even if someone taps Retake/Done meanwhile
+  const session = ++sessionId;
+  if (!shots.length) { busy = false; goHome(); return; }
   show('review');
   printed = false; copies = 1;
   $('copyNum').textContent = copies;
   $('status').textContent = '';
-  $('qrBox').hidden = true; $('qr').innerHTML = ''; $('qrWait').hidden = S.showQR !== 'true';
+  $('qrBox').hidden = true; $('qr').innerHTML = '';
+  $('qrWait').hidden = false; $('qrWait').textContent = 'Preparing your photo…';
+  $('holdMsg').hidden = true;
+  $('receiptImg').removeAttribute('src');          // never show the previous guest's strip
   const pm = printerMode();
   $('copyBox').hidden = !(pm === 'rawbt' || pm === 'paperang');
   $('printedBox').hidden = true;
@@ -727,34 +754,40 @@ async function finish() {
   $('bigPrint').hidden = !simple || qrOnly; $('bigPrint').textContent = 'Print'; $('bigPrint').disabled = true;
   $('doneBtn').hidden = simple && !qrOnly; shareDone = false;
   if (qrOnly) { $('copyBox').hidden = true; $('dialogPrintBtn').hidden = true; }
+  // Buttons wait until the strip is ready, so a quick tap can't interrupt it
+  $('retakeBtn').disabled = true; $('doneBtn').disabled = true; $('printBtn').disabled = true;
+  const live = () => session === sessionId && mode === 'review';
 
   let no;
-  try { no = await run('nextReceiptNo'); } catch (e) { no = Math.floor(Date.now() / 1000) % 1000000; }
+  try { no = await runRetry('nextReceiptNo', [], 2, 1500); } catch (e) { no = Math.floor(Date.now() / 1000) % 1000000; }
   await ensureFonts(S);
   await Promise.race([designReady, sleep(3000)]);
-  const canvas = renderReceipt(photos, S, no);
+  const canvas = renderReceipt(shots, S, no);
   const dataUrl = canvas.toDataURL('image/png');
-  lastStrip = { dataUrl, canvas, receiptNo: no };
-  // Show guests the full-colour version (the one they download). The printer still gets the black & white strip.
   const wantQR = S.showQR === 'true';
   const colourPreview = qrOnly || isStrip4();
-  const colorUrl = (wantQR || colourPreview) ? renderColorStrip(photos, S, no).toDataURL('image/jpeg', 0.88) : '';
-  $('receiptImg').src = colourPreview ? colorUrl : dataUrl;
-  $('receiptImg').style.imageRendering = colourPreview ? 'auto' : '';
-  $('printImg').src = dataUrl;
-  $('printImg').style.width = (S.paper === '80' ? 72 : 48) + 'mm';
-  $('bigPrint').disabled = false;
+  const colorUrl = (wantQR || colourPreview) ? renderColorStrip(shots, S, no).toDataURL('image/jpeg', 0.88) : '';
   busy = false;
-  resetIdle(60000);
+  if (live()) {
+    lastStrip = { dataUrl, canvas, receiptNo: no };
+    // Show guests the full-colour version (the one they download). The printer still gets the black & white strip.
+    $('receiptImg').src = colourPreview ? colorUrl : dataUrl;
+    $('receiptImg').style.imageRendering = colourPreview ? 'auto' : '';
+    $('printImg').src = dataUrl;
+    $('printImg').style.width = (S.paper === '80' ? 72 : 48) + 'mm';
+    $('bigPrint').disabled = false; $('retakeBtn').disabled = false; $('doneBtn').disabled = false; $('printBtn').disabled = false;
+    $('qrWait').textContent = 'Preparing your download QR…'; $('qrWait').hidden = !wantQR;
+    resetIdle(60000);
+    if (pm === 'browser' && S.autoPrint === 'true') setTimeout(dialogPrint, 400);
+  }
 
-  if (pm === 'browser' && S.autoPrint === 'true') setTimeout(dialogPrint, 400);
-
-  // Upload in the background: colour strip for the QR download (+ receipt image)
+  // Upload: colour strip for the QR download (+ receipt image). Retries on bad internet; never dropped.
   if (!wantQR && S.saveToDrive !== 'true' && !qrOnly) return;
-  const thisNo = no;
+  const job = [dataUrl, { receiptNo: no, eventName: S.eventName, shots: shots.length, baseUrl: API_URL, keepReceipt: qrOnly, guestBase: guestBase() }, colorUrl];
   try {
-    const r = await run('saveStrip', dataUrl, { receiptNo: no, eventName: S.eventName, shots: photos.length, baseUrl: API_URL, keepReceipt: qrOnly, guestBase: guestBase() }, colorUrl);
-    if (!lastStrip || lastStrip.receiptNo !== thisNo) return;          // guest already moved on
+    const r = await runRetry('saveStrip', job, 3, 2500);
+    flushPending();
+    if (!live() || !lastStrip || lastStrip.receiptNo !== no) return;     // guest already moved on (photo is saved)
     $('qrWait').hidden = true;
     if (wantQR && r.downloadUrl && window.QRCode) {
       new QRCode($('qr'), { text: r.downloadUrl, width: 400, height: 400, correctLevel: QRCode.CorrectLevel.M });
@@ -763,10 +796,11 @@ async function finish() {
     $('status').textContent = 'Saved ✓ #' + String(no).padStart(6, '0');
     if (qrOnly) startQrHold();
   } catch (e) {
-    if (lastStrip && lastStrip.receiptNo === thisNo) {
+    pendingUploads.push(job);                     // keep trying in the background
+    if (live()) {
       $('qrWait').hidden = true;
-      $('status').textContent = 'Couldn’t upload (no internet?) — the receipt still prints.';
-      if (qrOnly) { $('holdMsg').hidden = false; $('holdMsg').innerHTML = '<b>Couldn’t save the photo</b>Check the internet connection, then tap Retake or Done.'; }
+      $('status').textContent = 'No internet right now — the photo will be saved automatically when the connection is back.';
+      if (qrOnly) { $('holdMsg').hidden = false; $('holdMsg').innerHTML = '<b>Weak internet</b>Your photo will upload automatically when the connection is back. Tap Done to continue.'; }
     }
   }
 }
